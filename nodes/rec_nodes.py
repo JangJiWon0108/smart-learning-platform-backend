@@ -6,6 +6,8 @@ from config.properties import Settings
 from schemas.curator import VertexFilterOutput
 from vertex_ai_search.search import VertexExamSearchMetadata, retrieve_vertexai_search
 
+_settings = Settings()
+
 
 def _parse_vertex_results(raw: dict) -> list[dict]:
     out = []
@@ -33,8 +35,6 @@ def _parse_vertex_results(raw: dict) -> list[dict]:
 
 def vertex_search_func(vertex_filter_output: Any) -> None:
     """filter_agent 출력을 바탕으로 Vertex AI Search를 수행한다."""
-    settings = Settings()
-
     if isinstance(vertex_filter_output, dict):
         filter_out = VertexFilterOutput.model_validate(vertex_filter_output)
     else:
@@ -50,9 +50,9 @@ def vertex_search_func(vertex_filter_output: Any) -> None:
     )
 
     raw = retrieve_vertexai_search(
-        project_id=settings.PROJECT_ID,
-        location=settings.VERTEX_AI_SEARCH_LOCATION or settings.LOCATION,
-        engine_id=settings.ENGINE_ID or "",
+        project_id=_settings.PROJECT_ID,
+        location=_settings.VERTEX_AI_SEARCH_LOCATION or _settings.LOCATION,
+        engine_id=_settings.ENGINE_ID or "",
         search_query=filter_out.query_text,
         exam_metadata=meta,
         page_size=3,

@@ -33,11 +33,6 @@ class Settings(BaseSettings):
     GEMINI_MODEL_TYPE_CURATOR: str = "gemini-2.5-flash"
     GEMINI_MODEL_TYPE_TRACER: str = "gemini-2.5-flash"
 
-    # FAISS 벡터 스토어
-    FAISS_STORE_DIR: str = "data/faiss_store"
-    VECTOR_STORE_JSONL: str = "data/vector_store.jsonl"
-    EMBEDDING_MODEL: str = "/Users/n-jwjang/jjw/embedding/kure-v1"
-
     # 로깅
     LOGGING_DETAILS: bool = False
 

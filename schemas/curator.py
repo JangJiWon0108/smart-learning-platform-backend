@@ -1,4 +1,4 @@
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -27,13 +27,6 @@ class Problem(BaseModel):
     round: int
     similarity_score: float = Field(default=0.0, description="키워드 유사도 점수 (0.0~1.0)")
 
-
-class FAISSFilterOutput(BaseModel):
-    query_text: str = Field(..., description="시맨틱 검색에 사용할 텍스트")
-    metadata_filter: dict[str, Any] = Field(
-        default_factory=dict,
-        description="FAISS post-filter 조건 (question_type, has_explanation, year, round만 사용)",
-    )
 
 
 class VertexFilterOutput(BaseModel):
