@@ -31,7 +31,40 @@ env/
 .DS_Store
 
 # Claude Code
+.claude/
 .claude/settings.local.json
+
+# Google ADK session data
+**/.adk/
+**/.adk/session.db
+
+# Code review graph (MCP local graph DB)
+.code-review-graph/
+
+# FAISS / vector store binaries
+*.faiss
+*.index
+faiss_index/
+vector_store/
+
+# Credentials & service account keys
+*credentials*.json
+*service_account*.json
+*serviceaccount*.json
+*-key.json
+gcp_key*.json
+
+# Node.js
+node_modules/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Terraform / infra state
+*.tfstate
+*.tfstate.backup
+.terraform/
 
 # Data files (crawled/generated — track separately if needed)
 data/*.jsonl
@@ -46,3 +79,4 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
+credentials/

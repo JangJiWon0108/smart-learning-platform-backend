@@ -1,0 +1,28 @@
+from google.adk import Agent
+
+from config.gemini_retry import GEMINI_GENERATE_CONTENT_RETRY_CONFIG
+from config.llm_factory import get_adk_model
+from config.properties import Settings
+
+settings = Settings()
+
+tracer_intro_agent = Agent(
+    name="tracer_intro_agent",
+    model=get_adk_model(settings, purpose="tracer"),
+    generate_content_config=GEMINI_GENERATE_CONTENT_RETRY_CONFIG,
+    output_key="tracer_intro",
+    description="코드 시각화 결과 안내 텍스트 생성 에이전트",
+    instruction="""
+감지된 언어: {detected_language}
+
+아래 코드에 대한 실행 흐름 시각화 결과를 안내하는 친절한 소개 문장을 작성하세요.
+
+[코드]
+{tracer_code}
+
+요구사항:
+- 2~3문장으로 간결하게
+- "~에 대한 실행 흐름입니다. 아래 시각화를 통해 변수 변화와 실행 순서를 확인해보실 수 있습니다." 형식
+- 마크다운 없이 순수 텍스트만
+""",
+)

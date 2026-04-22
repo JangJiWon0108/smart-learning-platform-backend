@@ -1,9 +1,16 @@
 [project]
 name = "smart-learning-platform"
 version = "0.1.0"
-description = "Add your description here"
+description = "정보처리기사 지능형 학습 플랫폼 (Google ADK 2.0)"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "google-adk>=2.0.0a3",
+    "faiss-cpu>=1.13.2",
+    "fastapi>=0.115.0",
+    "google-adk[extensions]>=2.0.0a3",
+    "psycopg2-binary>=2.9.12",
+    "pydantic-settings>=2.0.0",
+    "python-multipart>=0.0.9",
+    "sentence-transformers>=5.4.1",
+    "uvicorn[standard]>=0.30.0",
 ]
