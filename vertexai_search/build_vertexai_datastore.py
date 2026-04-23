@@ -5,7 +5,7 @@
 이미지 의존 행은 제외.
 
 실행 (backend 디렉터리에서):
-  uv run python -m vertex_ai_search.build_vertex_store_vertexai_jsonl
+  uv run python -m vertexai_search.build_vertexai_datastore
 """
 from __future__ import annotations
 
@@ -19,10 +19,15 @@ from typing import Any, Iterator, TextIO
 from config.properties import BASE_DIR
 from log.logger import get_logger
 
-from .gemini_question_classifier import classify_question
+from .question_classifier import classify_question
 
+# ─── 전역 상태 및 로거 설정 ───
+
+# NDJSON 생성 진행 상황과 결과를 기록하기 위한 로거
 _logger = get_logger("build_vertexai_jsonl")
 
+
+# ─── 헬퍼 함수 ───
 
 def _document_id(legacy_id: str) -> str:
     s = str(legacy_id).strip()
@@ -67,15 +72,20 @@ def _iter_jsonl(path: Path) -> Iterator[dict[str, Any]]:
                 raise ValueError(f"{path} 라인 {lineno}: {e}") from e
 
 
+# ─── 메인 파이프라인 ───
+
 def build_jsonl(input_path: Path, output: TextIO) -> tuple[int, int]:
     written = skipped = 0
     for row in _iter_jsonl(input_path):
+        # 1단계: 이미지 의존 문항 스킵
         if _has_image(row):
             skipped += 1
             continue
 
+        # 2단계: Gemini 분류기 호출 (개념/코드 문제 판별)
         labels = classify_question(str(row.get("question", "")))
 
+        # 3단계: Vertex AI Search 스키마 규격(structData)으로 JSON 레코드 구성
         doc_id = _document_id(str(row.get("id", "")))
         record = {
             "documentId": doc_id,
@@ -90,6 +100,8 @@ def build_jsonl(input_path: Path, output: TextIO) -> tuple[int, int]:
                 **labels,
             },
         }
+        
+        # 4단계: NDJSON 파일에 쓰기
         output.write(json.dumps(record, ensure_ascii=False) + "\n")
         written += 1
         _logger.info("[%d] %s → %s", written, row.get("id", "?"), labels["question_type"])
@@ -97,6 +109,8 @@ def build_jsonl(input_path: Path, output: TextIO) -> tuple[int, int]:
     _logger.info("완료: %d건 기록 / %d건 스킵(이미지)", written, skipped)
     return written, skipped
 
+
+# ─── 스크립트 실행부 ───
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)

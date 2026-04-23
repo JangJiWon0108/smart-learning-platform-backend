@@ -1,15 +1,23 @@
+"""
+코드 시각화 결과를 안내하는 소개 메시지 생성 에이전트.
+
+tracer_agent가 분석 결과를 생성하는 동안
+스트리밍으로 먼저 "~에 대한 실행 흐름입니다" 같은 안내 문장을 보냅니다.
+"""
+
 from google.adk import Agent
 
 from config.gemini_retry import GEMINI_GENERATE_CONTENT_RETRY_CONFIG
-from config.llm_factory import get_adk_model
 from config.properties import Settings
 
+# 설정 로드
 settings = Settings()
 
 tracer_intro_agent = Agent(
     name="tracer_intro_agent",
-    model=get_adk_model(settings, purpose="tracer"),
+    model=settings.GEMINI_MODEL_TYPE_TRACER_INTRO,
     generate_content_config=GEMINI_GENERATE_CONTENT_RETRY_CONFIG,
+    # 소개 텍스트를 "tracer_intro" 키로 state에 저장합니다
     output_key="tracer_intro",
     description="코드 시각화 결과 안내 텍스트 생성 에이전트",
     instruction="""

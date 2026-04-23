@@ -8,6 +8,8 @@ from google.auth.transport.requests import AuthorizedSession
 from credentials.gcp_auth import get_credentials
 
 
+# ─── 세션 생성 함수 ───
+
 def vertex_discovery_authorized_session() -> AuthorizedSession:
     try:
         return AuthorizedSession(get_credentials())

@@ -1,15 +1,23 @@
+"""
+서비스 범위 밖의 질문에 친절하게 안내하는 에이전트.
+
+"other" 의도로 분류된 질문에 응답합니다.
+사용자를 서비스의 3가지 핵심 기능으로 자연스럽게 유도합니다.
+"""
+
 from google.adk import Agent
 
 from config.gemini_retry import GEMINI_GENERATE_CONTENT_RETRY_CONFIG
-from config.llm_factory import get_adk_model
 from config.properties import Settings
 
+# 설정 로드
 settings = Settings()
 
 fallback_agent = Agent(
     name="fallback_agent",
-    model=get_adk_model(settings, purpose="intent"),
+    model=settings.GEMINI_MODEL_TYPE_FALLBACK,
     generate_content_config=GEMINI_GENERATE_CONTENT_RETRY_CONFIG,
+    # 응답을 "fallback_output" 키로 state에 저장합니다
     output_key="fallback_output",
     description="지원 범위 외 질문에 대해 친절하게 안내하는 에이전트",
     instruction="""

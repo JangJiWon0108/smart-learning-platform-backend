@@ -1,17 +1,26 @@
+"""
+Vertex AI Search용 검색 필터를 생성하는 에이전트.
+
+사용자의 문제 추천 요청을 분석해서
+연도, 회차, 문제 유형 등의 검색 조건을 만들어냅니다.
+"""
+
 from google.adk import Agent
 
 from config.gemini_retry import GEMINI_GENERATE_CONTENT_RETRY_CONFIG
-from config.llm_factory import get_adk_model
 from config.properties import Settings
-from schemas.curator import VertexFilterOutput
+from smart_learning_agent.schemas.curator_output import VertexFilterOutput
 
+# 설정 로드
 settings = Settings()
 
 filter_agent = Agent(
     name="filter_agent",
-    model=get_adk_model(settings, purpose="curator"),
+    model=settings.GEMINI_MODEL_TYPE_FILTER,
     generate_content_config=GEMINI_GENERATE_CONTENT_RETRY_CONFIG,
+    # 출력 형식을 VertexFilterOutput JSON으로 강제합니다
     output_schema=VertexFilterOutput,
+    # 필터 결과를 "vertex_filter_output" 키로 state에 저장합니다
     output_key="vertex_filter_output",
     description="Vertex AI Search 메타 필터 생성 에이전트",
     instruction="""

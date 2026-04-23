@@ -1,18 +1,27 @@
+"""
+코드를 한 줄씩 실행하며 실행 흐름을 단계별로 추적하는 에이전트.
+
+실제 디버거처럼 각 줄마다 변수 상태, 콜스택, 메모리를 기록합니다.
+C/Java/Python을 지원합니다.
+"""
+
 from google.adk import Agent
 
 from config.gemini_retry import GEMINI_GENERATE_CONTENT_RETRY_CONFIG
-from config.llm_factory import get_adk_model
 from config.properties import Settings
-from schemas.tracer import TracerOutput
+from smart_learning_agent.callbacks import normalize_tracer_callback
+from smart_learning_agent.schemas.tracer_output import TracerOutput
 
+# 설정 로드
 settings = Settings()
 
 tracer_agent = Agent(
     name="tracer_agent",
-    model=get_adk_model(settings, purpose="tracer"),
+    model=settings.GEMINI_MODEL_TYPE_TRACER,
     generate_content_config=GEMINI_GENERATE_CONTENT_RETRY_CONFIG,
-    output_key="tracer_output",
     output_schema=TracerOutput,
+    output_key="tracer_output",
+    after_agent_callback=normalize_tracer_callback,
     description="코드 실행 흐름 단계별 시각화 에이전트",
     instruction="""
 당신은 코드 실행 흐름 시각화 전문가입니다.

@@ -15,6 +15,8 @@ from config.properties import Settings
 from .discovery_session import vertex_discovery_authorized_session
 
 
+# ─── 헬퍼 함수 및 필터 정의 ───
+
 def _filter_string_literal(value: str) -> str:
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
@@ -81,6 +83,8 @@ def build_vertex_exam_filter_expression(
     return " AND ".join(parts)
 
 
+# ─── 메인 검색 로직 ───
+
 def search_vertex_exam(
     search_query: str,
     *,
@@ -94,6 +98,7 @@ def search_vertex_exam(
     semantic_relevance_threshold: float | None = None,
     page_size: int = 10,
 ) -> dict[str, Any]:
+    # 1단계: 환경변수 및 설정 로드
     cfg = Settings()
     project_id = project_id or cfg.PROJECT_ID
     _cfg_loc = (cfg.VERTEX_AI_SEARCH_LOCATION or "").strip() or cfg.LOCATION
@@ -107,6 +112,7 @@ def search_vertex_exam(
     filter_expr = build_vertex_exam_filter_expression(exam_metadata)
     session = vertex_discovery_authorized_session()
 
+    # 2단계: 검색 페이로드 및 필터 표현식 조립
     payload: dict[str, Any] = {
         "query": search_query,
         "pageSize": page_size,
@@ -119,6 +125,7 @@ def search_vertex_exam(
     if user_pseudo_id:
         payload["userPseudoId"] = user_pseudo_id
 
+    # 3단계: 임계값(Threshold) 및 데이터 스토어 스펙 설정
     relevance_threshold = relevance_threshold or cfg.RELEVANCE_THRESHOLD
     semantic_threshold = (
         semantic_relevance_threshold
@@ -142,6 +149,7 @@ def search_vertex_exam(
             },
         ]
 
+    # 4단계: REST API 호출 및 결과 반환
     session.headers["X-Goog-User-Project"] = project_id
     url = (
         "https://discoveryengine.googleapis.com/v1alpha/"
@@ -188,6 +196,8 @@ def retrieve_vertexai_search(
         page_size=page_size,
     )
 
+
+# ─── 스크립트 실행부 ───
 
 if __name__ == "__main__":
     q = input("질문 >>> ").strip()

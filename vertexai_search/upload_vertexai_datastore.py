@@ -1,5 +1,5 @@
 """
-`build_vertex_store_vertexai_jsonl` 출력(NDJSON)을 Vertex AI Search에 올린다.
+`build_vertexai_datastore` 출력(NDJSON)을 Vertex AI Search에 올린다.
 
 Discovery Engine 문서 생성 요청:
   POST https://discoveryengine.googleapis.com/v1beta/{parent}/documents?documentId=DOCUMENT_ID
@@ -12,8 +12,8 @@ Discovery Engine 문서 생성 요청:
 기본 branch 는 Settings.VERTEX_AI_SEARCH_BRANCH (미설정 시 `0`).
 
 실행 (backend 에서, .env 에 PROJECT_ID, LOCATION, DATA_STORE_ID):
-  uv run python -m vertex_ai_search.upload_vertex_store_vertexai
-  uv run python -m vertex_ai_search.upload_vertex_store_vertexai --dry-run
+  uv run python -m vertexai_search.upload_vertexai_datastore
+  uv run python -m vertexai_search.upload_vertexai_datastore --dry-run
 """
 
 from __future__ import annotations
@@ -34,6 +34,8 @@ from .discovery_session import vertex_discovery_authorized_session
 if TYPE_CHECKING:
     from google.auth.transport.requests import AuthorizedSession
 
+
+# ─── 헬퍼 함수 (URL 및 파싱) ───
 
 def _branch_parent(cfg: Settings) -> str:
     if not cfg.PROJECT_ID or not cfg.DATA_STORE_ID:
@@ -101,6 +103,8 @@ def iter_records_from_ndjson(
     return rows
 
 
+# ─── 데이터 업로드 로직 ───
+
 def upload_all(
     session: "AuthorizedSession",
     cfg: Settings,
@@ -109,11 +113,16 @@ def upload_all(
     request_delay_sec: float,
 ) -> None:
     parent = _branch_parent(cfg)
+    
+    # 1단계: 세션 헤더에 인증된 사용자 프로젝트 추가
     session.headers["X-Goog-User-Project"] = cfg.PROJECT_ID
     for i, (doc_id, struct_data, content_plain) in enumerate(records, 1):
+        # 2단계: 개별 레코드에 대해 API 페이로드 구성
         body = _document_body(struct_data, content_plain)
         url = _document_create_url(parent, doc_id)
+        # 3단계: HTTP POST로 문서 생성 요청
         r = session.post(url, json=body, timeout=120)
+        # 4단계: (UPSERT) 이미 존재하는 문서(409 Conflict)일 경우 PATCH로 업데이트
         if r.status_code == 409:
             url = _document_upsert_url(parent, doc_id)
             r = session.patch(url, json=body, timeout=120)
@@ -121,11 +130,15 @@ def upload_all(
             raise RuntimeError(
                 f"UPSERT 실패 documentId={doc_id!r} HTTP {r.status_code}: {r.text}",
             )
+            
+        # 5단계: API 쿼터 우회를 위한 딜레이 적용 및 로깅
         if request_delay_sec > 0:
             time.sleep(request_delay_sec)
         if i % 50 == 0 or i == len(records):
             print(f"  업로드 {i}/{len(records)}")
 
+
+# ─── 스크립트 실행부 ───
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
