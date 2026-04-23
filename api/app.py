@@ -1,19 +1,18 @@
 """
-FastAPI 서버 진입점.
+FastAPI 서버 진입점
 
-클라이언트(프론트엔드)의 HTTP 요청을 받아서
-스마트 학습 에이전트를 실행하고 응답을 반환합니다.
+프론트엔드 HTTP 요청 수신 및 에이전트 실행 응답 반환
 
-실행 방법:
+실행 방법
   uv run uvicorn api.app:app --reload --app-dir .
 
-엔드포인트:
+엔드포인트 목록
   POST /chat        - 일반 요청/응답 (전체 결과를 한 번에 반환)
   POST /chat/stream - SSE 스트리밍 (텍스트를 실시간으로 전송)
   GET  /health      - 서버 상태 확인
 """
 
-# ─── 임포트 ──────────────────────────────────────────────────────────────
+# ─── 모듈 임포트 ───────────────────────────────────────────────────────────
 import json
 import logging
 import traceback
@@ -25,13 +24,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from smart_learning_agent import runner
 
-# ─── 설정 및 로거 ────────────────────────────────────────────────────────
+# ─── 환경 설정 및 로거 구성 ───────────────────────────────────────────────────
 log = logging.getLogger("api")
 
-# FastAPI 앱 객체 초기화
 app = FastAPI(title="Smart Learning Platform API")
 
-# CORS 설정: 개발 환경 대응 (모든 출처 허용)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -39,8 +36,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 스트리밍 모드에서 텍스트를 실시간 전송할 에이전트 이름 목록
-# 이 에이전트들의 출력만 청크(chunk) 이벤트로 스트리밍됩니다
+# 실시간 스트리밍 대상 에이전트 목록
 _STREAM_NODES = {
     "solver_agent",
     "tracer_intro_agent",
@@ -49,10 +45,47 @@ _STREAM_NODES = {
 }
 
 
-# ─── 내부 헬퍼 함수 ──────────────────────────────────────────────────────
+# ─── 내부 유틸리티 함수 ───────────────────────────────────────────────────────
+def _classify_error(exc: Exception) -> str:
+    """예외 종류에 따라 사용자 친화적인 오류 메시지를 반환합니다."""
+    cls = type(exc).__name__
+    msg = str(exc).strip()
+
+    # FastAPI HTTPException (이미지 형식 오류 등)
+    if isinstance(exc, HTTPException):
+        detail = exc.detail
+        return detail if isinstance(detail, str) else str(detail)
+
+    # 타임아웃
+    if isinstance(exc, TimeoutError) or "timeout" in cls.lower() or "timeout" in msg.lower():
+        return "응답 시간이 초과되었습니다 (60초). 잠시 후 다시 시도해 주세요."
+
+    # 네트워크 / 연결 오류
+    if isinstance(exc, (ConnectionError, OSError)) or "connection" in cls.lower():
+        return "AI 서버에 연결하지 못했습니다. 네트워크 상태를 확인하고 다시 시도해 주세요."
+
+    # Google / Vertex AI API 오류
+    if any(k in cls for k in ("Google", "Vertex", "ApiCore", "ClientError", "ServerError")):
+        if "quota" in msg.lower() or "429" in msg:
+            return "AI 서비스 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요."
+        if "permission" in msg.lower() or "403" in msg:
+            return "AI 서비스 인증에 문제가 있습니다. 서버 설정을 확인해 주세요."
+        if "not found" in msg.lower() or "404" in msg:
+            return "요청한 AI 모델을 찾을 수 없습니다. 모델 설정을 확인해 주세요."
+        if "unavailable" in msg.lower() or "503" in msg:
+            return "AI 서비스가 일시적으로 이용 불가 상태입니다. 잠시 후 다시 시도해 주세요."
+        return f"AI 서비스 오류: {msg}" if msg else "AI 서비스 오류가 발생했습니다."
+
+    # 잘못된 입력값
+    if isinstance(exc, (ValueError, TypeError)):
+        return f"잘못된 요청입니다: {msg}" if msg else "잘못된 요청 형식입니다."
+
+    # 기타 — 메시지가 있으면 그대로, 없으면 클래스명 포함
+    return msg if msg else f"오류가 발생했습니다 ({cls})."
+
+
 def _build_curation_payload(state: dict) -> dict | None:
-    """state에서 문제 카드 목록을 추출하여 큐레이션 페이로드를 생성합니다."""
-    # build_curation_callback이 problem_cards를 state에 미리 저장해둠
+    """상태 정보 기반 큐레이션 페이로드 생성"""
     problem_cards = state.get("problem_cards")
     if problem_cards is None:
         return None
@@ -66,25 +99,22 @@ def _build_curation_payload(state: dict) -> dict | None:
     }
 
 
-# ─── API 엔드포인트 ──────────────────────────────────────────────────────
+# ─── API 엔드포인트 정의 ───────────────────────────────────────────────────────
 @app.post("/chat")
 async def chat(
     query: str = Form(default=""),
     image: UploadFile | None = File(default=None),
 ):
-    """일반 채팅 엔드포인트 (비스트리밍)."""
-    # 1단계: 유효성 검사 (텍스트 또는 이미지 중 하나는 필수)
+    """일반 채팅 엔드포인트 (비스트리밍 방식)"""
     if not query.strip() and image is None:
         raise HTTPException(
             status_code=400,
             detail="query 또는 image 중 하나는 필수입니다.",
         )
 
-    # 2단계: 요청용 고유 세션 ID 및 콘텐츠 준비
     session_id = str(uuid.uuid4())
     content = await runner.prepare_content(query, image, session_id)
 
-    # 3단계: 에이전트 실행 및 결과 획득 (비스트리밍)
     response_text = None
     async for event in runner.execute_agent(session_id, content):
         if event.is_final_response() and event.content:
@@ -92,15 +122,12 @@ async def chat(
                 if part.text:
                     response_text = part.text
 
-    # 4단계: 최종 state 확인 및 응답 타입 결정 (큐레이션, 코드추적, 일반텍스트 순)
     state = await runner.get_session_state(session_id)
 
-    # 4.1 추천 경로 확인
     curation = _build_curation_payload(state)
     if curation:
         return curation
 
-    # 4.2 코드 추적 경로 확인
     if "tracer_output" in state:
         return {
             "type": "tracer",
@@ -108,7 +135,6 @@ async def chat(
             "data": state["tracer_output"],
         }
 
-    # 4.3 일반 텍스트 응답
     return {
         "type": "text",
         "route": state.get("current_route"),
@@ -121,78 +147,83 @@ async def chat_stream(
     query: str = Form(default=""),
     image: UploadFile | None = File(default=None),
 ):
-    """SSE(Server-Sent Events) 스트리밍 채팅 엔드포인트."""
-    # 1단계: 유효성 검사
+    """SSE(Server-Sent Events) 기반 스트리밍 채팅 엔드포인트"""
     if not query.strip() and image is None:
         raise HTTPException(
             status_code=400,
             detail="query 또는 image 중 하나는 필수입니다.",
         )
 
-    # 2단계: 요청 준비
     session_id = str(uuid.uuid4())
-    content = await runner.prepare_content(query, image, session_id)
 
-    # 3단계: 스트리밍 이벤트 생성기 정의
     async def event_generator() -> AsyncGenerator[str, None]:
         emitted_nodes: set[str] = set()
+        streaming_node: str | None = None
 
         try:
-            # 3.1 워크플로우 실행 및 이벤트 수신
+            # prepare_content도 try 안에서 실행해 모든 초기화 오류를 SSE error로 전달
+            content = await runner.prepare_content(query, image, session_id)
+
+            prev_node: str | None = None
             async for event in runner.execute_agent_stream(session_id, content):
                 node_info = getattr(event, "node_info", None)
                 node_name = getattr(node_info, "name", None) if node_info else None
+                is_stream_node = node_name in _STREAM_NODES if node_name else False
 
-                # 처리 노드 변경 시 state 이벤트 전송
+                # 스트리밍 노드에서 다른 노드로 전환될 때 stream_end 신호 전송
+                if (
+                    prev_node is not None
+                    and streaming_node is not None
+                    and node_name != prev_node
+                    and streaming_node == prev_node
+                ):
+                    yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
+                    streaming_node = None
+                prev_node = node_name
+
                 if node_name and node_name not in emitted_nodes:
                     emitted_nodes.add(node_name)
-                    state_event = json.dumps({"type": "state", "node": node_name})
-                    yield f"data: {state_event}\n\n"
+                    yield f"data: {json.dumps({'type': 'state', 'node': node_name})}\n\n"
 
-                if not event.partial or not event.content:
-                    continue
+                if is_stream_node and event.content:
+                    for part in event.content.parts:
+                        if part.text and not getattr(part, "function_call", None):
+                            streaming_node = node_name
+                            yield f"data: {json.dumps({'type': 'chunk', 'text': part.text})}\n\n"
 
-                # 허용된 노드의 텍스트 청크만 전송
-                if node_name not in _STREAM_NODES:
-                    continue
+                # partial=False 종료 이벤트가 들어오면 즉시 stream_end 전송
+                # (다음 노드 이벤트를 기다리지 않게 해서 프론트 대기 말풍선 지연 제거)
+                if is_stream_node and streaming_node == node_name and not event.partial:
+                    yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
+                    streaming_node = None
 
-                for part in event.content.parts:
-                    is_function_call = getattr(part, "function_call", None)
-                    if part.text and not is_function_call:
-                        chunk_event = json.dumps({"type": "chunk", "text": part.text})
-                        yield f"data: {chunk_event}\n\n"
+            # 스트림 노드 종료 이벤트가 누락된 경우 방어적으로 마무리 신호 전송
+            if streaming_node is not None:
+                yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
+                streaming_node = None
 
-            # 4단계: 실행 완료 후 최종 결과(비정형 데이터) 전송
+            # 정상 완료 시 최종 데이터 전송
             state = await runner.get_session_state(session_id)
 
-            # 4.1 추천 결과
             curation = _build_curation_payload(state)
             if curation:
                 yield f"data: {json.dumps(curation, ensure_ascii=False)}\n\n"
 
-            # 4.2 코드 추적 결과
             if "tracer_output" in state:
-                tracer_event = {
-                    "type": "tracer",
-                    "route": state.get("current_route"),
-                    "data": state["tracer_output"],
-                }
-                yield f"data: {json.dumps(tracer_event, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'tracer', 'route': state.get('current_route'), 'data': state['tracer_output']}, ensure_ascii=False)}\n\n"
 
         except Exception as exc:
-            log.error("event_generator 예외: %s\n%s", exc, traceback.format_exc())
-            error_event = json.dumps({"type": "error", "message": str(exc)}, ensure_ascii=False)
-            yield f"data: {error_event}\n\n"
+            log.error("event_generator 예외 [%s]: %s\n%s", type(exc).__name__, exc, traceback.format_exc())
+            error_msg = _classify_error(exc)
+            yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
 
         finally:
-            # 5단계: 완료 신호 전송
-            done_event = json.dumps({"type": "done"})
-            yield f"data: {done_event}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @app.get("/health")
 async def health():
-    """서버 상태 확인 엔드포인트."""
+    """서버 헬스체크 엔드포인트"""
     return {"status": "ok"}

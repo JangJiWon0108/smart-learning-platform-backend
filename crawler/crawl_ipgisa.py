@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-정보처리기사 실기 기출문제 크롤러
-Source: chobopark.tistory.com
-Output: data/ipgisa_questions.jsonl
+정보처리기사 실기 기출문제 크롤링 모듈
+
+출처: chobopark.tistory.com
+출력 파일: data/ipgisa_questions.jsonl
 """
 from __future__ import annotations
 
@@ -16,8 +17,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 
-# ──────────────────────────────────────────
-# 시험 목록 (year, round, url)
+# ─── 환경 설정 및 상수 정의 ───────────────────────────────────────────────────
+# 크롤링 대상 시험 목록 (연도, 회차, URL)
 # ──────────────────────────────────────────
 EXAMS = [
     # 2020 (4회)
@@ -86,7 +87,7 @@ def extract_images(container: Tag) -> List[Dict[str, str]]:
 
 
 def is_code_table(table: Tag) -> bool:
-    """코드 하이라이터 테이블 여부 판별."""
+    """코드 하이라이터 테이블 식별"""
     classes = table.get("class") or []
     if "colorscripter-code-table" in classes:
         return True
@@ -98,8 +99,8 @@ def is_code_table(table: Tag) -> bool:
 
 def extract_code_table(table: Tag) -> str:
     """
-    코드 하이라이터 테이블에서 코드만 추출.
-    구조: td[0]=줄번호, td[1]=코드내용, (td[2]=언어식별자)
+    코드 하이라이터 테이블 내 소스 코드 추출
+    구조: 줄번호(td[0]), 코드내용(td[1]), 언어(td[2])
     """
     tbody = table.find("tbody") or table
     trs = tbody.find_all("tr", recursive=False)
@@ -111,12 +112,12 @@ def extract_code_table(table: Tag) -> str:
         return clean_text(table.get_text(separator="\n"))
 
     lang = clean_text(tds[-1].get_text()) if len(tds) >= 3 else ""
-    # 언어 식별자 td는 짧은 텍스트 (cs, java, python 등)
+    # 언어 식별자 텍스트 추출 (cs, java, python 등)
     if lang and len(lang) > 10:
         lang = ""
 
     code_td = tds[1]
-    # 각 라인 div를 줄 단위로 결합
+    # 코드 라인별 div 태그 결합 및 줄바꿈 처리
     line_divs = code_td.find_all("div", recursive=False)
     if line_divs:
         lines = []
@@ -133,7 +134,7 @@ def extract_code_table(table: Tag) -> str:
 
 
 def find_code_table(node: Tag):
-    """node 내에서 첫 번째 코드 테이블을 반환 (없으면 None)."""
+    """노드 내 첫 번째 코드 테이블 탐색 및 반환"""
     for table in node.find_all("table"):
         if is_code_table(table):
             return table
@@ -141,14 +142,14 @@ def find_code_table(node: Tag):
 
 
 def node_to_text(node) -> str:
-    """Tag or NavigableString → clean text."""
+    """HTML 태그 및 문자열의 텍스트 정규화"""
     if isinstance(node, NavigableString):
         return clean_text(str(node))
     if isinstance(node, Tag):
         if node.name == "table":
             if is_code_table(node):
                 return extract_code_table(node)
-            # 일반 표: 행 단위 변환
+            # 일반 테이블 데이터의 행 단위 텍스트 변환
             rows = []
             for tr in node.find_all("tr"):
                 cells = [clean_text(td.get_text(separator=" ")) for td in tr.find_all(["td", "th"])]
@@ -157,7 +158,7 @@ def node_to_text(node) -> str:
                     rows.append(row)
             return "\n".join(rows)
         if node.name == "div":
-            # 코드 래퍼 div 감지: 내부에 코드 테이블 포함 여부
+            # 코드 래퍼 div 내 테이블 존재 여부 확인
             code_table = find_code_table(node)
             if code_table:
                 return extract_code_table(code_table)
@@ -167,11 +168,11 @@ def node_to_text(node) -> str:
 
 def split_answer_explanation(ml_div: Tag) -> Tuple[str, str]:
     """
-    moreless-content 내 정답(#009a87)과 해설(#006dd7) 분리.
-    색상 기준:
-      청록(#009a87, rgb(0,154,135), #00897b 등) → 정답
-      파랑(#006dd7, rgb(0,109,215)) → 해설
-    색상 없는 텍스트는 정답이 없으면 정답으로, 있으면 해설로.
+    moreless-content 내 정답(청록) 및 해설(파랑) 데이터 분리 로직
+
+    색상 기반 식별 및 미지정 시 순차적 할당
+    청록(#009a87, rgb(0,154,135), #00897b 등) → 정답
+    파랑(#006dd7, rgb(0,109,215)) → 해설
     """
     content_div = ml_div.find("div", class_="moreless-content")
     if not content_div:
@@ -188,7 +189,7 @@ def split_answer_explanation(ml_div: Tag) -> Tuple[str, str]:
             txt = clean_text(str(node))
             if not txt:
                 return
-            # 부모 체인 전체에서 모든 color 수집 (조상 우선순위: 녹색 > 파랑)
+            # 부모 노드 기반 색상 정보 수집 (우선순위: 녹색 > 파랑)
             has_green = False
             has_blue = False
             parent = node.parent
@@ -223,16 +224,16 @@ def split_answer_explanation(ml_div: Tag) -> Tuple[str, str]:
 
 
 def find_body(soup: BeautifulSoup) -> Optional[Tag]:
-    """실제 문제 본문 컨테이너를 반환."""
-    # 1순위: tt_article_useless_p_margin (tistory 본문 컨테이너)
+    """문제 본문 컨테이너 식별 및 추출"""
+    # 1순위: 티스토리 본문 컨테이너 (tt_article_useless_p_margin)
     body = soup.find("div", class_="tt_article_useless_p_margin")
     if body:
         return body
-    # 2순위: contents_style
+    # 2순위: contents_style 클래스
     body = soup.find("div", class_="contents_style")
     if body:
         return body
-    # 3순위: entry-content
+    # 3순위: entry-content 클래스
     return soup.find(class_="entry-content")
 
 
@@ -244,7 +245,7 @@ def is_moreless(node) -> bool:
 
 
 def nodes_before_moreless(wrapper: Tag) -> List[Any]:
-    """wrapper div 안에서 moreLess div 이전 노드들만 반환."""
+    """moreLess 구분자 이전의 문제 영역 노드 추출"""
     result = []
     for child in wrapper.children:
         if is_moreless(child):
@@ -260,11 +261,11 @@ def parse_exam_page(html: str, year: int, round_: int, url: str) -> List[Dict[st
         print(f"  [WARN] body not found: {url}")
         return []
 
-    # 페이지 제목 추출
+    # 시험 페이지 제목 정보 추출
     title_tag = body.find(["h2", "h3", "h4"])
     page_title = clean_text(title_tag.get_text()) if title_tag else f"{year}년 {round_}회"
 
-    # 순차 탐색: h3 이후부터 수집
+    # 콘텐츠 순차 탐색 (h3 태그 이후 데이터 수집)
     h3_passed = False
     current_q_nodes: List[Any] = []
     question_blocks: List[Tuple[List[Any], Tag]] = []  # (question_nodes, moreless_div)
@@ -276,11 +277,11 @@ def parse_exam_page(html: str, year: int, round_: int, url: str) -> List[Dict[st
             continue
 
         if is_moreless(child):
-            # 직접 moreLess: 누적된 노드가 문제 텍스트
+            # moreLess 직접 매칭 시 누적 노드를 문제 텍스트로 처리
             question_blocks.append((current_q_nodes, child))
             current_q_nodes = []
         elif isinstance(child, Tag) and child.find("div", attrs={"data-ke-type": "moreLess"}):
-            # 래퍼 div: 안에 코드표 + moreLess 포함
+            # 래퍼 div 내 코드표 및 moreLess 포함 케이스 처리
             inner_ml = child.find("div", attrs={"data-ke-type": "moreLess"})
             pre_nodes = nodes_before_moreless(child)
             question_blocks.append((current_q_nodes + pre_nodes, inner_ml))
@@ -291,7 +292,7 @@ def parse_exam_page(html: str, year: int, round_: int, url: str) -> List[Dict[st
     questions = []
 
     for i, (q_nodes, ml_div) in enumerate(question_blocks):
-        # 문제 텍스트 + 이미지 수집
+        # 문제 텍스트 및 이미지 데이터 수집
         text_parts: List[str] = []
         q_images: List[Dict] = []
 
@@ -306,7 +307,7 @@ def parse_exam_page(html: str, year: int, round_: int, url: str) -> List[Dict[st
                 if t:
                     text_parts.append(t)
 
-        # 연속 빈줄 정리
+        # 연속된 개행 문자 정규화
         lines: List[str] = []
         for block in text_parts:
             for line in block.split("\n"):
@@ -316,16 +317,16 @@ def parse_exam_page(html: str, year: int, round_: int, url: str) -> List[Dict[st
 
         q_text = "\n".join(lines)
 
-        # 문제 번호: 텍스트 앞에서 추출, 없으면 순서로
+        # 문제 번호 식별 및 정규 추출
         q_num = i + 1
         m = re.match(r"^\s*(\d+)\s*[.．]\s*", q_text)
         if m:
             q_num = int(m.group(1))
 
-        # 정답 + 해설
+        # 정답 및 해설 데이터 매핑
         answer, explanation = split_answer_explanation(ml_div)
 
-        # moreless 안 이미지 (답안 다이어그램 등)
+        # 답안 영역(moreless) 내 이미지 추출
         answer_images = extract_images(ml_div)
 
         q_id = f"{year}_{round_:02d}_{q_num:02d}"

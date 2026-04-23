@@ -1,31 +1,29 @@
 """
-정보처리기사 실기 문제를 풀어주는 에이전트.
+정보처리기사 실기 문제 풀이 전용 에이전트
 
-텍스트 문제, 코드 문제, 이미지 문제 등
-다양한 형태의 문제를 해설하고 정답을 제시합니다.
-
-google_search 도구를 사용해서 최신 정보를 검색할 수 있습니다.
+텍스트, 코드, 이미지 등 다양한 유형의 문제 해설 및 정답 제시
+Google Search 도구를 활용한 최신 정보 검색 기능 포함
 """
 
-# ─── 임포트 ──────────────────────────────────────────────────────────────
+# ─── 모듈 임포트 ───────────────────────────────────────────────────────────
 from google.adk import Agent
 from google.adk.tools import google_search
 
 from config.gemini_retry import GEMINI_GENERATE_CONTENT_RETRY_CONFIG
 from config.properties import Settings
 
-# ─── 설정 및 상수 ────────────────────────────────────────────────────────
-# 전역 환경 설정 객체
+# ─── 환경 설정 및 전역 상수 ───────────────────────────────────────────────────
+# 전역 환경 설정 관리 객체
 settings = Settings()
 
-# ─── 에이전트 정의 ────────────────────────────────────────────────────────
+# ─── Solver 에이전트 구성 ───────────────────────────────────────────────────
 solver_agent = Agent(
     name="solver_agent",
     model=settings.GEMINI_MODEL_TYPE_SOLVER,
     generate_content_config=GEMINI_GENERATE_CONTENT_RETRY_CONFIG,
-    # 풀이 결과를 "solver_output" 키로 state에 저장합니다
+    # 문제 풀이 결과의 세션 상태 저장 키 정의 (solver_output)
     output_key="solver_output",
-    # google_search 도구로 필요시 웹 검색을 합니다
+    # 필요 시 Google Search 도구를 통한 웹 검색 수행
     tools=[google_search],
     description="정보처리기사 문제 해설 전문 에이전트",
     instruction="""

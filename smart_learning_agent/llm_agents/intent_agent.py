@@ -1,29 +1,28 @@
 """
-사용자 입력의 의도를 분류하는 에이전트.
+사용자 입력 의도 분류 전용 에이전트
 
-사용자가 무엇을 원하는지(문제풀이? 추천? 시각화? 기타)를
-Gemini 모델이 분석해서 결정합니다.
+사용자 요구사항(문제풀이, 추천, 시각화 등)에 대한 Gemini 기반 분석 및 결정 수행
 """
 
-# ─── 임포트 ──────────────────────────────────────────────────────────────
+# ─── 모듈 임포트 ───────────────────────────────────────────────────────────
 from google.adk import Agent
 
 from config.gemini_retry import GEMINI_GENERATE_CONTENT_RETRY_CONFIG
 from config.properties import Settings
 from smart_learning_agent.schemas.intent_output import IntentOutput
 
-# ─── 설정 및 상수 ────────────────────────────────────────────────────────
-# 전역 환경 설정 객체
+# ─── 환경 설정 및 전역 상수 ───────────────────────────────────────────────────
+# 전역 환경 설정 관리 객체
 settings = Settings()
 
-# ─── 에이전트 정의 ────────────────────────────────────────────────────────
+# ─── Intent 분류 에이전트 구성 ───────────────────────────────────────────────────
 intent_classification_agent = Agent(
     name="intent_classification",
     model=settings.GEMINI_MODEL_TYPE_INTENT,
     generate_content_config=GEMINI_GENERATE_CONTENT_RETRY_CONFIG,
-    # 출력 형식을 IntentOutput JSON으로 강제합니다
+    # 출력 데이터 형식의 IntentOutput JSON 규격 강제
     output_schema=IntentOutput,
-    # 분류 결과를 "intent_output" 키로 state에 저장합니다
+    # 의도 분류 결과의 세션 상태 저장 키 정의 (intent_output)
     output_key="intent_output",
     description="사용자 입력의 의도를 분류하는 에이전트",
     instruction="""
