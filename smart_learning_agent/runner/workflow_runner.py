@@ -42,12 +42,20 @@ async def prepare_content(
     session_id: str,
 ) -> types.Content:
     """사용자 요청 데이터 기반 ADK Content 객체 생성 및 세션 초기화"""
-    await workflow_runner.session_service.create_session(
+    session = await workflow_runner.session_service.get_session(
         app_name=workflow_runner.app_name,
         user_id=USER_ID,
         session_id=session_id,
-        state={"has_image": image is not None},
     )
+    if session is None:
+        await workflow_runner.session_service.create_session(
+            app_name=workflow_runner.app_name,
+            user_id=USER_ID,
+            session_id=session_id,
+            state={"has_image": image is not None},
+        )
+    else:
+        session.state["has_image"] = image is not None
 
     parts: list[types.Part] = []
 

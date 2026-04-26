@@ -1,3 +1,10 @@
+"""
+추천 문제 텍스트 정제 전용 에이전트.
+
+Python 큐레이션 노드가 구성한 문제 목록을 카드 표시용 지문, 코드, 언어 정보로 정리합니다.
+"""
+
+# ─── 모듈 임포트 ───────────────────────────────────────────────────────────
 from google.adk import Agent
 
 from config.gemini_retry import GEMINI_GENERATE_CONTENT_RETRY_CONFIG
@@ -5,8 +12,10 @@ from config.properties import Settings
 from smart_learning_agent.callbacks import build_curation_callback
 from smart_learning_agent.schemas.refine_output import RefineOutput
 
+# ─── 설정 로드 ─────────────────────────────────────────────────────────────
 settings = Settings()
 
+# ─── 에이전트 정의 ─────────────────────────────────────────────────────────
 question_refine_agent = Agent(
     name="question_refine_agent",
     model=settings.GEMINI_MODEL_TYPE_QUESTION_REFINE,
@@ -19,7 +28,7 @@ question_refine_agent = Agent(
 당신은 정보처리기사 기출 문제 텍스트를 정제하는 전문가입니다.
 
 입력 문제 목록:
-{curator_output}
+{curator_output?}
 
 위 문제들을 각각 정제하세요.
 

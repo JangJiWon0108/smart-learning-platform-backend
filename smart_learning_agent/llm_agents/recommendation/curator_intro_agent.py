@@ -1,19 +1,21 @@
 """
 추천 결과를 사용자에게 친근하게 소개하는 에이전트.
 
-curator_agent가 문제 카드를 준비하는 동안
+큐레이션 노드가 문제 카드를 준비하는 동안
 스트리밍으로 먼저 "N개 찾았어요~" 같은 안내 메시지를 보냅니다.
 사용자가 결과를 기다리는 동안 빈 화면 대신 텍스트가 보이게 됩니다.
 """
 
+# ─── 모듈 임포트 ───────────────────────────────────────────────────────────
 from google.adk import Agent
 
 from config.gemini_retry import GEMINI_GENERATE_CONTENT_RETRY_CONFIG
 from config.properties import Settings
 
-# 설정 로드
+# ─── 설정 로드 ─────────────────────────────────────────────────────────────
 settings = Settings()
 
+# ─── 에이전트 정의 ─────────────────────────────────────────────────────────
 curator_intro_agent = Agent(
     name="curator_intro_agent",
     model=settings.GEMINI_MODEL_TYPE_CURATOR_INTRO,
@@ -24,9 +26,9 @@ curator_intro_agent = Agent(
     instruction="""
 당신은 정보처리기사 실기 문제 추천 결과를 '사용자에게 친화적으로' 소개하는 진행자입니다.
 
-검색 키워드: {rec_keywords}
-과목: {rec_subject}
-Vertex AI Search 검색 결과: {rec_search_results}
+검색어: {rec_query?}
+문제 유형: {rec_subject?}
+Vertex AI Search 검색 결과: {rec_search_results?}
 
 요구사항:
 - 첫 줄에서 "추천 문제를 N개 찾았어요"처럼 친화적으로 시작하세요. (N은 rec_search_results 길이 또는 0)

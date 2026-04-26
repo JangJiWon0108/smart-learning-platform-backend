@@ -5,6 +5,7 @@
 C/Java/Python을 지원합니다.
 """
 
+# ─── 모듈 임포트 ───────────────────────────────────────────────────────────
 from google.adk import Agent
 
 from config.gemini_retry import GEMINI_GENERATE_CONTENT_RETRY_CONFIG
@@ -12,9 +13,10 @@ from config.properties import Settings
 from smart_learning_agent.callbacks import normalize_tracer_callback
 from smart_learning_agent.schemas.tracer_output import TracerOutput
 
-# 설정 로드
+# ─── 설정 로드 ─────────────────────────────────────────────────────────────
 settings = Settings()
 
+# ─── 에이전트 정의 ─────────────────────────────────────────────────────────
 tracer_agent = Agent(
     name="tracer_agent",
     model=settings.GEMINI_MODEL_TYPE_TRACER,
@@ -25,16 +27,16 @@ tracer_agent = Agent(
     description="코드 실행 흐름 단계별 시각화 에이전트",
     instruction="""
 당신은 코드 실행 흐름 시각화 전문가입니다.
-감지된 언어: {detected_language}
+감지된 언어: {detected_language?}
 
-[분석할 코드]
-{tracer_code}
+[분석할 코드] (왼쪽 숫자 = 줄 번호, step의 line 필드에 이 번호를 그대로 사용)
+{tracer_code_numbered?}
 
 위 코드를 실제 디버거처럼 한 줄씩 실행하며 TracerOutput을 채우세요.
 
 ## steps 작성 규칙
 - 선언문·대입·함수 호출·반환·출력 등 실행 가능한 줄마다 하나의 step 생성
-- `line`: 원본 코드 기준 1-indexed 줄 번호
+- `line`: 현재 **실행되는 문장(statement)** 의 1-indexed 줄 번호. 메서드/클래스 선언줄이 아닌, 실제로 동작하는 코드 줄을 가리켜야 함. 예: `new Child()`가 실행 중이면 `Parent p = new Child();` 줄 번호, `p.hello()`가 실행 중이면 해당 줄 번호
 - `variables`: 해당 스코프의 현재 모든 변수 이름→값 스냅샷
 - `changed_vars`: 이 step에서 새로 생기거나 값이 바뀐 변수 이름 목록
 - `call_stack`: 외부→내부 순서 함수명 목록 (예: ["main", "add"])

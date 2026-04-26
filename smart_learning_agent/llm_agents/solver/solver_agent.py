@@ -12,11 +12,10 @@ from google.adk.tools import google_search
 from config.gemini_retry import GEMINI_GENERATE_CONTENT_RETRY_CONFIG
 from config.properties import Settings
 
-# ─── 환경 설정 및 전역 상수 ───────────────────────────────────────────────────
-# 전역 환경 설정 관리 객체
+# ─── 설정 로드 ─────────────────────────────────────────────────────────────
 settings = Settings()
 
-# ─── Solver 에이전트 구성 ───────────────────────────────────────────────────
+# ─── 에이전트 정의 ─────────────────────────────────────────────────────────
 solver_agent = Agent(
     name="solver_agent",
     model=settings.GEMINI_MODEL_TYPE_SOLVER,
@@ -30,7 +29,7 @@ solver_agent = Agent(
 당신은 정보처리기사 실기 전문 튜터입니다.
 
 [입력]
-{solver_query}
+{solver_query?}
 
 입력 유형에 따라 형식을 선택하세요. 유형 레이블은 출력하지 마세요.
 

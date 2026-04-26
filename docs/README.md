@@ -32,8 +32,8 @@ Google ADK 기반의 에이전트 오케스트레이션 전반 구현.
 | 기능 | 사용 위치 | 설명 |
 |------|-----------|------|
 | **`Workflow`** | `agent.py` | 전체 에이전트 그래프 정의. 엣지(edge) 목록을 통한 노드 간 실행 순서·분기 선언. |
-| **`Agent` (LlmAgent)** | `llm_agents/` 전반 | Gemini 모델 래핑 LLM 에이전트. `instruction`, `output_schema`, `output_key` 등 설정 관리. |
-| **`Event`** | `nodes/` 전반 | 노드(전처리 함수)의 세션 상태 갱신 및 반환용 이벤트 타입. |
+| **`Agent` (LlmAgent)** | `llm_agents/{route}/` | Gemini 모델 래핑 LLM 에이전트. `instruction`, `output_schema`, `output_key` 등 설정 관리. |
+| **`Event`** | `nodes/{route}/` | 노드(전처리 함수)의 세션 상태 갱신 및 반환용 이벤트 타입. |
 | **`App`** | `runner/workflow_runner.py` | 에이전트 애플리케이션 컨테이너. `context_cache_config` 및 `events_compaction_config` 설정 후 `InMemoryRunner` 전달. |
 | **`ContextCacheConfig`** | `runner/workflow_runner.py` | 컨텍스트 캐싱 설정. 대형 시스템 프롬프트의 Gemini API 캐시 재사용을 통한 비용 절감 (`min_tokens`, `ttl_seconds`, `cache_intervals`). |
 | **`EventsCompactionConfig`** | `runner/workflow_runner.py` | 이벤트 컴팩션 설정. 장기 세션 기록의 LLM 요약·압축을 통한 컨텍스트 윈도우 절약. 슬라이딩 윈도우 및 토큰 임계값 전략 병행. |
@@ -42,8 +42,8 @@ Google ADK 기반의 에이전트 오케스트레이션 전반 구현.
 | **`session_service`** | `runner/workflow_runner.py` | 세션 생성·조회 및 `state` 딕셔너리를 통한 노드 간 데이터 공유 관리. |
 | **Artifact Service** | `artifacts/image.py` | 이미지 업로드 시 아티팩트 저장 및 참조 처리. |
 | **`CallbackContext`** | `callbacks/` | 에이전트 실행 완료 후 후처리 및 스트리밍 메시지 생성 수행. |
-| **`google_search`** | `solver_agent.py` | 문제 해설 시 Google 검색을 ADK 기본 도구로 활용. |
-| **`output_schema`** | `llm_agents/` 전반 | Pydantic 스키마를 통한 구조화된 LLM 출력 강제. |
+| **`google_search`** | `llm_agents/solver/solver_agent.py` | 문제 해설 및 시험 일정·출제 범위·합격 기준 같은 최신 정보 조회 시 Google 검색을 ADK 기본 도구로 활용. |
+| **`output_schema`** | `llm_agents/{route}/` | Pydantic 스키마를 통한 구조화된 LLM 출력 강제. |
 
 ### 그 외 기술 스택
 
@@ -229,6 +229,15 @@ POST https://discoveryengine.googleapis.com/v1alpha/
 ### 전체 워크플로우 구조
 
 `agent.py`에서 `Workflow` 엣지 목록으로 전체 그래프 선언.
+공통 전처리와 라우트별 구현은 다음 하위 패키지로 분리.
+
+| 구분 | LLM Agent | Function Node |
+|---|---|---|
+| 공통 | `llm_agents/common/` | `nodes/common/` |
+| 문제 풀이 | `llm_agents/solver/` | `nodes/solver/` |
+| 문제 추천 | `llm_agents/recommendation/` | `nodes/recommendation/` |
+| 코드 시각화 | `llm_agents/visualization/` | `nodes/visualization/` |
+| 범위 밖 응답 | `llm_agents/fallback/` | 없음 |
 
 ```mermaid
 flowchart TD
@@ -238,21 +247,22 @@ flowchart TD
 
     START(["START"])
 
-    QP["query_preprocess_func<br/>원본 쿼리 저장"]:::fn
-    QR(["query_rewrite_agent<br/>쿼리 재작성"]):::llm
-    IC(["intent_classification_agent<br/>의도 분류"]):::llm
+    QP["query_preprocess_func<br/>original_query 저장"]:::fn
+    QR(["query_rewrite_agent<br/>rewritten_query 저장"]):::llm
+    IC(["intent_classification_agent<br/>rewritten_query 기준 의도 분류"]):::llm
     IR{"intent_router<br/>브랜치 결정"}:::rt
 
-    SP["solver_preprocess_func<br/>이미지·텍스트 전처리"]:::fn
+    SP["solver_preprocess_func<br/>rewritten_query + 이미지 전처리"]:::fn
     SA(["solver_agent<br/>문제 풀이·해설<br/>+ google_search"]):::llm
 
-    FA(["filter_agent<br/>검색 필터 생성"]):::llm
+    FA(["filter_agent<br/>메타 필터 생성"]):::llm
     VS["vertex_search_func<br/>Vertex AI Search 호출"]:::fn
     CI(["curator_intro_agent<br/>추천 소개 스트리밍"]):::llm
-    CA(["curator_agent<br/>문제 선별"]):::llm
+    CA["build_curator_output_func<br/>문제 목록 구성"]:::fn
     QRA(["question_refine_agent<br/>문제 형식 정제"]):::llm
 
-    LD["language_detect_func<br/>코드 언어 감지"]:::fn
+    TIA(["tracer_input_agent<br/>코드 추출·언어 감지"]):::llm
+    PTI["prepare_tracer_input_func<br/>줄 번호 코드 생성"]:::fn
     TI(["tracer_intro_agent<br/>시각화 소개 스트리밍"]):::llm
     TA(["tracer_agent<br/>코드 한 줄씩 추적"]):::llm
 
@@ -262,7 +272,7 @@ flowchart TD
 
     IR -->|solver| SP --> SA
     IR -->|recommendation| FA --> VS --> CI --> CA --> QRA
-    IR -->|visualization| LD --> TI --> TA
+    IR -->|visualization| TIA --> PTI --> TI --> TA
     IR -->|other| FB
 ```
 
@@ -275,13 +285,19 @@ flowchart TD
 | state 키 | 저장 주체 | 내용 |
 |---|---|---|
 | `has_image` | 세션 초기화 | 이미지 첨부 여부. |
-| `original_query` | `query_preprocess_func` | 원본 사용자 입력값. |
-| `intent_output` | `intent_classification_agent` | 분류된 의도 결과. |
-| `vertex_filter_output` | `filter_agent` | Vertex AI 검색 조건. |
+| `original_query` | `query_preprocess_func` | 원본 사용자 입력값. 재작성 결과로 덮어쓰지 않음. |
+| `rewritten_query` | `query_rewrite_agent` | 멀티턴 맥락을 반영한 재작성 질문. 이후 의도 분류와 분기 처리의 기준값. |
+| `intent_output` | `intent_classification_agent` | `rewritten_query` 기반으로 분류된 의도 결과. |
+| `solver_query` | `solver_preprocess_func` | `rewritten_query`와 이미지 첨부 여부를 조합한 Solver 입력값. |
+| `vertex_filter_output` | `filter_agent` | Vertex AI Search 메타 필터. 검색어는 `rewritten_query`를 그대로 사용. |
 | `solver_output` | `solver_agent` | 문제 풀이 결과. |
-| `curator_output` | `curator_agent` | 선별된 문제 목록. |
+| `curator_output` | `build_curator_output_func` | 선별된 문제 목록. |
 | `refine_output` | `question_refine_agent` | 정제된 문제 카드 데이터. |
 | `problem_cards` | `build_curation_callback` | 최종 추천 카드 목록. |
+| `tracer_input` | `tracer_input_agent` | `rewritten_query`에서 LLM이 추출한 코드와 언어. |
+| `tracer_code` | `prepare_tracer_input_func` | 실행 흐름 분석 대상 코드. |
+| `tracer_code_numbered` | `prepare_tracer_input_func` | 줄 번호가 붙은 분석 대상 코드. |
+| `detected_language` | `prepare_tracer_input_func` | 감지된 코드 언어. |
 | `tracer_output` | `tracer_agent` | 코드 추적 결과 데이터. |
 
 ---

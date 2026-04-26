@@ -5,20 +5,20 @@ curator_output + refine_output을 읽어 프론트엔드 문제 카드 목록을
 state["problem_cards"]에 저장합니다.
 """
 
-# ─── 임포트 ──────────────────────────────────────────────────────────────
+# ─── 모듈 임포트 ───────────────────────────────────────────────────────────
 import random
 import re
-from typing import Any, Optional
+from typing import Any
 
 from google.adk.agents.callback_context import CallbackContext
 from google.genai import types
 
-# ─── 설정 및 상수 ────────────────────────────────────────────────────────
+# ─── 상수 정의 ─────────────────────────────────────────────────────────────
 # 문제 카드에 적용할 강조 색상 목록
 _CARD_ACCENTS = ["violet", "cyan", "amber", "rose"]
 
 
-# ─── 내부 헬퍼 함수 ──────────────────────────────────────────────────────
+# ─── 헬퍼 함수 ─────────────────────────────────────────────────────────────
 def _accent_for(_problem: dict[str, Any]) -> str:
     """문제 카드에 무작위 강조 색상을 할당합니다."""
     return random.choice(_CARD_ACCENTS)
@@ -93,30 +93,32 @@ def _to_problem_cards(
         round_number = int(problem.get("round") or 0)
 
         # 3단계: 최종 카드 객체 구성
-        cards.append({
-            "problemId": problem_id,
-            "year": year,
-            "round": round_number,
-            "questionNumber": _extract_question_number(problem) or 0,
-            "examTitle": f"[{year}년 {round_number}회] 정보처리기사 실기",
-            "stemPreview": display_question,
-            "officialAnswer": str(problem.get("answer") or "") or None,
-            "matchLabel": _match_label_for(problem),
-            "accent": _accent_for(problem),
-            "subject": problem.get("subject"),
-            "similarityScore": problem.get("similarity_score"),
-            "question": display_question,
-            "code": display_code,
-            "codeLanguage": code_language,
-            "answer": problem.get("answer"),
-            "explanation": problem.get("explanation"),
-        })
+        cards.append(
+            {
+                "problemId": problem_id,
+                "year": year,
+                "round": round_number,
+                "questionNumber": _extract_question_number(problem) or 0,
+                "examTitle": f"[{year}년 {round_number}회] 정보처리기사 실기",
+                "stemPreview": display_question,
+                "officialAnswer": str(problem.get("answer") or "") or None,
+                "matchLabel": _match_label_for(problem),
+                "accent": _accent_for(problem),
+                "subject": problem.get("subject"),
+                "similarityScore": problem.get("similarity_score"),
+                "question": display_question,
+                "code": display_code,
+                "codeLanguage": code_language,
+                "answer": problem.get("answer"),
+                "explanation": problem.get("explanation"),
+            }
+        )
 
     return cards
 
 
-# ─── 콜백 함수 ──────────────────────────────────────────────────────────
-def build_curation_callback(callback_context: CallbackContext) -> Optional[types.Content]:
+# ─── 콜백 함수 ─────────────────────────────────────────────────────────────
+def build_curation_callback(callback_context: CallbackContext) -> types.Content | None:
     """에이전트 실행 완료 후 최종 UI용 문제 카드를 생성하여 state에 저장합니다."""
     state = callback_context.state
     curator_data = state.get("curator_output")

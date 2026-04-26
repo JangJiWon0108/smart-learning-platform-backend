@@ -39,9 +39,9 @@ app.add_middleware(
 # 실시간 스트리밍 대상 에이전트 목록
 _STREAM_NODES = {
     "solver_agent",
-    "tracer_intro_agent",
-    "curator_intro_agent",
     "fallback_agent",
+    "curator_intro_agent",
+    "tracer_intro_agent",
 }
 
 
@@ -63,6 +63,10 @@ def _classify_error(exc: Exception) -> str:
     # 네트워크 / 연결 오류
     if isinstance(exc, (ConnectionError, OSError)) or "connection" in cls.lower():
         return "AI 서버에 연결하지 못했습니다. 네트워크 상태를 확인하고 다시 시도해 주세요."
+
+    # ADK가 래핑한 quota 오류는 Google/Vertex 클래스명이 아닐 수 있습니다.
+    if "quota" in msg.lower() or "resource_exhausted" in msg.lower() or "429" in msg:
+        return "AI 서비스 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요."
 
     # Google / Vertex AI API 오류
     if any(k in cls for k in ("Google", "Vertex", "ApiCore", "ClientError", "ServerError")):
@@ -104,6 +108,7 @@ def _build_curation_payload(state: dict) -> dict | None:
 async def chat(
     query: str = Form(default=""),
     image: UploadFile | None = File(default=None),
+    session_id: str = Form(default=""),
 ):
     """일반 채팅 엔드포인트 (비스트리밍 방식)"""
     if not query.strip() and image is None:
@@ -112,7 +117,7 @@ async def chat(
             detail="query 또는 image 중 하나는 필수입니다.",
         )
 
-    session_id = str(uuid.uuid4())
+    session_id = session_id.strip() or str(uuid.uuid4())
     content = await runner.prepare_content(query, image, session_id)
 
     response_text = None
@@ -128,11 +133,12 @@ async def chat(
     if curation:
         return curation
 
-    if "tracer_output" in state:
+    tracer_output = state.get("tracer_output")
+    if isinstance(tracer_output, dict) and tracer_output.get("steps"):
         return {
             "type": "tracer",
             "route": state.get("current_route"),
-            "data": state["tracer_output"],
+            "data": tracer_output,
         }
 
     return {
@@ -146,6 +152,7 @@ async def chat(
 async def chat_stream(
     query: str = Form(default=""),
     image: UploadFile | None = File(default=None),
+    session_id: str = Form(default=""),
 ):
     """SSE(Server-Sent Events) 기반 스트리밍 채팅 엔드포인트"""
     if not query.strip() and image is None:
@@ -154,10 +161,11 @@ async def chat_stream(
             detail="query 또는 image 중 하나는 필수입니다.",
         )
 
-    session_id = str(uuid.uuid4())
+    session_id = session_id.strip() or str(uuid.uuid4())
 
     async def event_generator() -> AsyncGenerator[str, None]:
         emitted_nodes: set[str] = set()
+        streamed_text_nodes: set[str] = set()
         streaming_node: str | None = None
 
         try:
@@ -188,8 +196,16 @@ async def chat_stream(
                 if is_stream_node and event.content:
                     for part in event.content.parts:
                         if part.text and not getattr(part, "function_call", None):
-                            streaming_node = node_name
-                            yield f"data: {json.dumps({'type': 'chunk', 'text': part.text})}\n\n"
+                            # ADK는 partial 조각 이후 같은 노드의 최종 완성본을 다시 보낼 수 있습니다.
+                            # partial을 이미 보낸 노드라면 최종 완성본은 중복 전송하지 않습니다.
+                            if event.partial:
+                                streaming_node = node_name
+                                streamed_text_nodes.add(node_name)
+                                yield f"data: {json.dumps({'type': 'chunk', 'text': part.text})}\n\n"
+                            elif node_name not in streamed_text_nodes:
+                                streaming_node = node_name
+                                streamed_text_nodes.add(node_name)
+                                yield f"data: {json.dumps({'type': 'chunk', 'text': part.text})}\n\n"
 
                 # partial=False 종료 이벤트가 들어오면 즉시 stream_end 전송
                 # (다음 노드 이벤트를 기다리지 않게 해서 프론트 대기 말풍선 지연 제거)
@@ -209,8 +225,11 @@ async def chat_stream(
             if curation:
                 yield f"data: {json.dumps(curation, ensure_ascii=False)}\n\n"
 
-            if "tracer_output" in state:
-                yield f"data: {json.dumps({'type': 'tracer', 'route': state.get('current_route'), 'data': state['tracer_output']}, ensure_ascii=False)}\n\n"
+            tracer_output = state.get("tracer_output")
+            if isinstance(tracer_output, dict) and tracer_output.get("steps"):
+                yield f"data: {json.dumps({'type': 'tracer', 'route': state.get('current_route'), 'data': tracer_output}, ensure_ascii=False)}\n\n"
+            elif state.get("current_route") == "visualization":
+                yield f"data: {json.dumps({'type': 'error', 'message': '코드 실행 흐름 분석에 실패했습니다. 다시 시도해 주세요.'}, ensure_ascii=False)}\n\n"
 
         except Exception as exc:
             log.error("event_generator 예외 [%s]: %s\n%s", type(exc).__name__, exc, traceback.format_exc())

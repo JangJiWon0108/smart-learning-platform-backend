@@ -4,26 +4,15 @@
 추천 에이전트의 입력(검색 필터)과 출력(추천 문제 목록)을 정의합니다.
 """
 
-from typing import Literal
-
 from pydantic import BaseModel, Field
 
 
+# ─── 스키마 정의 ───────────────────────────────────────────────────────────
 class KeywordOutput(BaseModel):
     """사용자 질문에서 추출한 키워드와 과목 정보."""
 
     keywords: list[str] = Field(..., description="추출된 핵심 키워드 목록")
     subject: str = Field(default="", description="추정 과목 (없으면 빈 문자열)")
-
-
-class WeaknessOutput(BaseModel):
-    """사용자의 취약 유형과 추천 난이도."""
-
-    weakness_type: str = Field(..., description="취약 유형 설명 (예: C 포인터 연산, SQL JOIN)")
-    difficulty_preference: Literal["easy", "medium", "hard", "any"] = Field(
-        default="any",
-        description="추천 난이도",
-    )
 
 
 class Problem(BaseModel):
@@ -35,7 +24,6 @@ class Problem(BaseModel):
 
     id: str
     subject: str
-    difficulty: Literal["easy", "medium", "hard"]
     question_number: int | None = Field(default=None, description="문항 번호 (없으면 None)")
     question: str
     answer: str
@@ -47,13 +35,11 @@ class Problem(BaseModel):
 
 class VertexFilterOutput(BaseModel):
     """
-    Vertex AI Search 검색에 사용할 필터 조건.
+    Vertex AI Search 검색에 사용할 메타 필터 조건.
 
-    filter_agent가 사용자 질문을 분석해서 이 형태로 출력합니다.
+    filter_agent가 사용자 질문을 분석해서 검색 범위를 좁히는 필터만 출력합니다.
+    실제 검색어는 rewritten_query를 그대로 사용합니다.
     """
-
-    # 시맨틱 검색에 사용할 텍스트 (키워드, 개념 설명 등을 풍부하게 포함)
-    query_text: str = Field(..., description="시맨틱 검색에 사용할 텍스트")
 
     # 메타 필터 조건들 (불필요하면 빈 리스트/null)
     years: list[int] = Field(default_factory=list, description="특정 연도 필터 (예: [2023, 2024])")
@@ -75,6 +61,5 @@ class CuratorOutput(BaseModel):
     """
 
     query_keywords: list[str] = Field(..., description="검색에 사용된 키워드")
-    weakness_type: str = Field(..., description="분석된 취약 유형")
     recommended_problems: list[Problem] = Field(..., description="추천 문제 목록 (최대 3개)")
     recommendation_reason: str = Field(..., description="이 문제들을 추천하는 이유 설명")

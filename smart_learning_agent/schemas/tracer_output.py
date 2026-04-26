@@ -5,11 +5,13 @@
 단계별로 기록한 결과를 담습니다.
 """
 
+# ─── 모듈 임포트 ───────────────────────────────────────────────────────────
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 
+# ─── 스키마 정의 ───────────────────────────────────────────────────────────
 class MemoryCell(BaseModel):
     """
     C 언어 포인터용 메모리 셀 정보.

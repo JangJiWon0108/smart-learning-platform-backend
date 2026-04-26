@@ -35,7 +35,7 @@ def get_credentials():
 
 
 def init_google_genai(*, project: str, location: str) -> None:
-    """Vertex AI 인증 초기화합니다."""
+    """Vertex AI 인증 초기화"""
     credentials = get_credentials()
     os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "True"
     vertexai.init(project=project, location=location, credentials=credentials)

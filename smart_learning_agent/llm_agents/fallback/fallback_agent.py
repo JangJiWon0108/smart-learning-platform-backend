@@ -5,14 +5,16 @@
 사용자를 서비스의 3가지 핵심 기능으로 자연스럽게 유도합니다.
 """
 
+# ─── 모듈 임포트 ───────────────────────────────────────────────────────────
 from google.adk import Agent
 
 from config.gemini_retry import GEMINI_GENERATE_CONTENT_RETRY_CONFIG
 from config.properties import Settings
 
-# 설정 로드
+# ─── 설정 로드 ─────────────────────────────────────────────────────────────
 settings = Settings()
 
+# ─── 에이전트 정의 ─────────────────────────────────────────────────────────
 fallback_agent = Agent(
     name="fallback_agent",
     model=settings.GEMINI_MODEL_TYPE_FALLBACK,
@@ -21,7 +23,7 @@ fallback_agent = Agent(
     output_key="fallback_output",
     description="지원 범위 외 질문에 대해 친절하게 안내하는 에이전트",
     instruction="""
-사용자 질문: {original_query}
+사용자 질문: {rewritten_query?}
 
 위 질문은 현재 서비스 범위를 벗어납니다.
 아래 형식으로 답변하세요.

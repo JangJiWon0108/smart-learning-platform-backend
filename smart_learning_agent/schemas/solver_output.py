@@ -5,19 +5,21 @@
 이 스키마는 참고용입니다.
 """
 
+# ─── 모듈 임포트 ───────────────────────────────────────────────────────────
 from pydantic import BaseModel, Field
 
 
+# ─── 스키마 정의 ───────────────────────────────────────────────────────────
 class SolverOutput(BaseModel):
     """
     문제 풀이 결과.
 
     Attributes:
-        subject:           과목명
-        explanation:       단계별 풀이 해설 (마크다운 사용 가능)
-        answer:            최종 정답
-        key_concepts:      핵심 개념 키워드 목록
-        related_topics:    연관해서 공부하면 좋은 주제
+        subject: 과목명
+        explanation: 단계별 풀이 해설 (마크다운 사용 가능)
+        answer: 최종 정답
+        key_concepts: 핵심 개념 키워드 목록
+        related_topics: 연관해서 공부하면 좋은 주제
         search_references: 참고한 웹 검색 URL 목록
     """
 

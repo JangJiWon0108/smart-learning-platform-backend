@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     GEMINI_MODEL_TYPE_CURATOR_INTRO: str = "gemini-2.5-flash"
     GEMINI_MODEL_TYPE_CURATOR: str = "gemini-2.5-flash"
     GEMINI_MODEL_TYPE_QUESTION_REFINE: str = "gemini-2.5-flash"
+    GEMINI_MODEL_TYPE_TRACER_PREPROCESS: str = "gemini-2.5-flash"
     GEMINI_MODEL_TYPE_TRACER_INTRO: str = "gemini-2.5-flash"
     GEMINI_MODEL_TYPE_TRACER: str = "gemini-2.5-flash"
 

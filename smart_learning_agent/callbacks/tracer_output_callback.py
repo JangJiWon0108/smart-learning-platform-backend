@@ -5,13 +5,14 @@ LLM이 코드를 변형하는 경우가 있어서,
 TracerOutput의 original_code와 각 step.code를 사용자 원본 코드로 덮어씁니다.
 """
 
-from typing import Optional
-
+# ─── 모듈 임포트 ───────────────────────────────────────────────────────────
 from google.adk.agents.callback_context import CallbackContext
 from google.genai import types
 
 
-def normalize_tracer_callback(callback_context: CallbackContext) -> Optional[types.Content]:
+# ─── 콜백 함수 ─────────────────────────────────────────────────────────────
+def normalize_tracer_callback(callback_context: CallbackContext) -> types.Content | None:
+    """tracer 출력의 코드 문자열을 사용자 원본 코드 기준으로 정규화합니다."""
     state = callback_context.state
     tracer_output = state.get("tracer_output")
     tracer_code = state.get("tracer_code")
