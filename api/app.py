@@ -164,6 +164,9 @@ async def chat_stream(
     session_id = session_id.strip() or str(uuid.uuid4())
 
     async def event_generator() -> AsyncGenerator[str, None]:
+        # emitted_nodes: 각 노드의 state 이벤트를 한 번만 보내기 위한 기록
+        # streamed_text_nodes: partial chunk를 이미 보낸 노드의 최종 완성본 중복 전송 방지
+        # streaming_node: 현재 chunk를 전송 중인 노드. stream_end 판단에 사용
         emitted_nodes: set[str] = set()
         streamed_text_nodes: set[str] = set()
         streaming_node: str | None = None
@@ -178,7 +181,9 @@ async def chat_stream(
                 node_name = getattr(node_info, "name", None) if node_info else None
                 is_stream_node = node_name in _STREAM_NODES if node_name else False
 
-                # 스트리밍 노드에서 다른 노드로 전환될 때 stream_end 신호 전송
+                # stream_end 조건 1:
+                # chunk를 보내던 스트리밍 노드에서 다른 노드로 넘어간 경우.
+                # 프론트는 이를 보고 현재 답변 말풍선 스트리밍이 끝났다고 처리합니다.
                 if (
                     prev_node is not None
                     and streaming_node is not None
@@ -189,10 +194,16 @@ async def chat_stream(
                     streaming_node = None
                 prev_node = node_name
 
+                # state 조건:
+                # 새 노드 이름을 처음 만났을 때 모든 노드에 대해 1회 전송합니다.
+                # 프론트는 node 값을 상태 말풍선/로딩 문구로 변환해 보여줍니다.
                 if node_name and node_name not in emitted_nodes:
                     emitted_nodes.add(node_name)
                     yield f"data: {json.dumps({'type': 'state', 'node': node_name})}\n\n"
 
+                # chunk 조건:
+                # 현재 노드가 _STREAM_NODES에 포함되어 있고, ADK 이벤트에 텍스트가 있을 때만 전송합니다.
+                # 프론트는 text 값을 채팅 말풍선에 이어 붙입니다.
                 if is_stream_node and event.content:
                     for part in event.content.parts:
                         if part.text and not getattr(part, "function_call", None):
@@ -207,36 +218,49 @@ async def chat_stream(
                                 streamed_text_nodes.add(node_name)
                                 yield f"data: {json.dumps({'type': 'chunk', 'text': part.text})}\n\n"
 
-                # partial=False 종료 이벤트가 들어오면 즉시 stream_end 전송
-                # (다음 노드 이벤트를 기다리지 않게 해서 프론트 대기 말풍선 지연 제거)
+                # stream_end 조건 2:
+                # chunk를 보내던 스트리밍 노드에서 partial=False 종료 이벤트가 들어온 경우.
+                # 다음 노드 이벤트를 기다리지 않게 해서 프론트 대기 말풍선 지연을 줄입니다.
                 if is_stream_node and streaming_node == node_name and not event.partial:
                     yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
                     streaming_node = None
 
-            # 스트림 노드 종료 이벤트가 누락된 경우 방어적으로 마무리 신호 전송
+            # stream_end 조건 3:
+            # workflow는 끝났지만 stream_end가 누락된 경우 방어적으로 마무리 신호를 보냅니다.
             if streaming_node is not None:
                 yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
                 streaming_node = None
 
-            # 정상 완료 시 최종 데이터 전송
+            # 최종 결과 조건:
+            # workflow가 정상 완료되면 session state에서 구조화 결과를 꺼내 전송합니다.
+            # recommendation은 curation, visualization은 tracer 이벤트로 보냅니다.
             state = await runner.get_session_state(session_id)
 
+            # curation 조건:
+            # state에 problem_cards가 있으면 추천 문제 카드 최종 결과로 전송합니다.
             curation = _build_curation_payload(state)
             if curation:
                 yield f"data: {json.dumps(curation, ensure_ascii=False)}\n\n"
 
+            # tracer 조건:
+            # state에 tracer_output.steps가 있으면 코드 실행 흐름 최종 결과로 전송합니다.
             tracer_output = state.get("tracer_output")
             if isinstance(tracer_output, dict) and tracer_output.get("steps"):
                 yield f"data: {json.dumps({'type': 'tracer', 'route': state.get('current_route'), 'data': tracer_output}, ensure_ascii=False)}\n\n"
             elif state.get("current_route") == "visualization":
+                # visualization route였지만 tracer 결과가 없으면 프론트에 오류 말풍선을 띄웁니다.
                 yield f"data: {json.dumps({'type': 'error', 'message': '코드 실행 흐름 분석에 실패했습니다. 다시 시도해 주세요.'}, ensure_ascii=False)}\n\n"
 
         except Exception as exc:
             log.error("event_generator 예외 [%s]: %s\n%s", type(exc).__name__, exc, traceback.format_exc())
             error_msg = _classify_error(exc)
+            # error 조건:
+            # 입력 준비, ADK 실행, 최종 결과 생성 중 예외가 나면 사용자용 오류 메시지를 보냅니다.
             yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
 
         finally:
+            # done 조건:
+            # 성공/실패와 관계없이 전체 /chat/stream 요청이 끝났음을 마지막에 항상 알립니다.
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")

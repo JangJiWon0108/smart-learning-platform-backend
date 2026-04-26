@@ -8,12 +8,11 @@
 - [임베딩 전략](#임베딩-전략)
 - [Vertex AI Search 적재 / 검색](#vertex-ai-search-적재--검색)
 - [Google ADK 에이전트 프로세스](#google-adk-에이전트-프로세스)
-- [FastAPI 래핑](#fastapi-래핑)
-- [스트리밍 데이터 전송 흐름](#스트리밍-데이터-전송-흐름)
+- [스트림 데이터 전송 흐름](#스트림-데이터-전송-흐름)
 
 ---
 
-## 동기
+## 1️⃣ 동기
 
 - **주제별 문제 탐색의 어려움**  
   특정 개념(예: C 언어 이중 포인터, 자바 업캐스팅)에 특화된 문제 연습의 한계. 기존 기출·복원 자료의 회차별 구성에 따른 주제별 탐색 번거로움 해소를 위해 RAG 기반 벡터 검색 적용.
@@ -23,7 +22,7 @@
 
 ---
 
-## 사용 기술 및 도구
+## 2️⃣ 사용 기술 및 도구
 
 ### Google ADK (Agent Development Kit) `v2.0`
 
@@ -33,15 +32,12 @@ Google ADK 기반의 에이전트 오케스트레이션 전반 구현.
 |------|-----------|------|
 | **`Workflow`** | `agent.py` | 전체 에이전트 그래프 정의. 엣지(edge) 목록을 통한 노드 간 실행 순서·분기 선언. |
 | **`Agent` (LlmAgent)** | `llm_agents/{route}/` | Gemini 모델 래핑 LLM 에이전트. `instruction`, `output_schema`, `output_key` 등 설정 관리. |
-| **`Event`** | `nodes/{route}/` | 노드(전처리 함수)의 세션 상태 갱신 및 반환용 이벤트 타입. |
-| **`App`** | `runner/workflow_runner.py` | 에이전트 애플리케이션 컨테이너. `context_cache_config` 및 `events_compaction_config` 설정 후 `InMemoryRunner` 전달. |
-| **`ContextCacheConfig`** | `runner/workflow_runner.py` | 컨텍스트 캐싱 설정. 대형 시스템 프롬프트의 Gemini API 캐시 재사용을 통한 비용 절감 (`min_tokens`, `ttl_seconds`, `cache_intervals`). |
-| **`EventsCompactionConfig`** | `runner/workflow_runner.py` | 이벤트 컴팩션 설정. 장기 세션 기록의 LLM 요약·압축을 통한 컨텍스트 윈도우 절약. 슬라이딩 윈도우 및 토큰 임계값 전략 병행. |
+| **`Event`** | `llm_agents/{route}/`, `nodes/{route}/`, `runner/workflow_runner.py` | 노드·Agent 실행 결과를 다음 단계로 전달하는 ADK 이벤트 객체. LLM Agent는 `output_key`로 결과를 `session.state`에 저장하고, Function Node는 `Event(state=...)`로 state를 직접 갱신. |
 | **`InMemoryRunner`** | `runner/workflow_runner.py` | 워크플로우 실행 러너. 세션 및 아티팩트 서비스 내장. |
-| **`RunConfig` + `StreamingMode.SSE`** | `runner/workflow_runner.py` | SSE(Server-Sent Events) 방식의 스트리밍 응답 설정. |
-| **`session_service`** | `runner/workflow_runner.py` | 세션 생성·조회 및 `state` 딕셔너리를 통한 노드 간 데이터 공유 관리. |
-| **Artifact Service** | `artifacts/image.py` | 이미지 업로드 시 아티팩트 저장 및 참조 처리. |
-| **`CallbackContext`** | `callbacks/` | 에이전트 실행 완료 후 후처리 및 스트리밍 메시지 생성 수행. |
+| **`RunConfig` + `StreamingMode.SSE`** | `runner/workflow_runner.py` | ADK Workflow를 스트리밍 모드로 실행해 원본 ADK 이벤트를 순차 반환. |
+| **`session_service`** | `runner/workflow_runner.py` | `InMemoryRunner` 내장 인메모리 세션 서비스. 세션 생성·조회 및 `state` 딕셔너리를 통한 노드 간 데이터 공유 관리. |
+| **`Artifact Service`** | `artifacts/image.py` | `InMemoryRunner` 내장 인메모리 아티팩트 서비스. 이미지 업로드 시 아티팩트 저장 및 참조 처리. |
+| **`callbacks`** | `callbacks/` | 에이전트 실행 완료 후 추천 카드·Tracer 결과를 최종 응답 형태로 정리하는 후처리 모듈. |
 | **`google_search`** | `llm_agents/solver/solver_agent.py` | 문제 해설 및 시험 일정·출제 범위·합격 기준 같은 최신 정보 조회 시 Google 검색을 ADK 기본 도구로 활용. |
 | **`output_schema`** | `llm_agents/{route}/` | Pydantic 스키마를 통한 구조화된 LLM 출력 강제. |
 
@@ -56,7 +52,7 @@ Google ADK 기반의 에이전트 오케스트레이션 전반 구현.
 
 ---
 
-## 전체 흐름
+## 3️⃣ 전체 흐름
 
 ```mermaid
 flowchart TD
@@ -74,7 +70,7 @@ flowchart TD
 
     라우터 -->|"문제 해설"| 해설
     라우터 -->|"유사 문제 추천"| 추천
-    라우터 -->|"코드 실행 흐름"| 시각화
+    라우터 -->|"코드 실행 흐름 시각화"| 시각화
 
     VAS -->|"검색 결과"| 추천
 
@@ -85,18 +81,11 @@ flowchart TD
 
 ---
 
-## 크롤링
+## 4️⃣ 크롤링
 
 ### 출처
 
 티스토리 블로그 **[chobopark.tistory.com](https://chobopark.tistory.com)** — 정보처리기사 실기 기출·복원 문제 회차별 정리 사이트. 2020년~2025년 총 19개 회차 URL 코드 명시 및 데이터 수집 수행.
-
-### 사용 라이브러리
-
-| 라이브러리 | 역할 |
-|---|---|
-| `urllib.request` | HTTP GET 요청 처리 (표준 라이브러리). |
-| `BeautifulSoup4` + `lxml` | HTML 파싱 및 DOM 탐색 수행. |
 
 ### 크롤링 전략
 
@@ -133,7 +122,7 @@ Tistory 포스트 구조 분석 기반 데이터 추출 규칙 적용.
 
 ---
 
-## 임베딩 전략
+## 5️⃣ 임베딩 전략
 
 크롤링 결과 가공을 통한 Vertex AI Search 적재용 문서 구성 (`vertexai_search/build_vertexai_datastore.py`).
 
@@ -157,11 +146,11 @@ public class Test {
 [해설] 정수 10과 20을 더한 값(30)을 문자열과 결합하여 출력하는 기본적인 Java 프로그래밍 문항임.
 ```
 
-해당 구성을 통해 답변 확인형 검색과 주제 기반 문제 검색 모두 동일 문서에서 대응 가능하도록 구현.
+해설이 없는 경우, [해설] 필드는 제외
 
 ---
 
-## Vertex AI Search 적재 / 검색
+## 6️⃣ Vertex AI Search 적재 / 검색
 
 ### 적재 (Upload)
 
@@ -224,20 +213,13 @@ POST https://discoveryengine.googleapis.com/v1alpha/
 
 ---
 
-## Google ADK 에이전트 프로세스
+## 7️⃣ Google ADK 에이전트 프로세스
+
 
 ### 전체 워크플로우 구조
 
-`agent.py`에서 `Workflow` 엣지 목록으로 전체 그래프 선언.
-공통 전처리와 라우트별 구현은 다음 하위 패키지로 분리.
-
-| 구분 | LLM Agent | Function Node |
-|---|---|---|
-| 공통 | `llm_agents/common/` | `nodes/common/` |
-| 문제 풀이 | `llm_agents/solver/` | `nodes/solver/` |
-| 문제 추천 | `llm_agents/recommendation/` | `nodes/recommendation/` |
-| 코드 시각화 | `llm_agents/visualization/` | `nodes/visualization/` |
-| 범위 밖 응답 | `llm_agents/fallback/` | 없음 |
+<span style="display:inline-block;padding:4px 10px;border-radius:8px;background:#dbeafe;color:#1e3a8a;border:1px solid #3b82f6;font-weight:600;">Python Function Node</span>
+<span style="display:inline-block;padding:4px 10px;border-radius:8px;background:#fef9c3;color:#713f12;border:1px solid #ca8a04;font-weight:600;">LLM Agent</span>
 
 ```mermaid
 flowchart TD
@@ -245,28 +227,28 @@ flowchart TD
     classDef llm   fill:#fef9c3,stroke:#ca8a04,color:#713f12
     classDef rt    fill:#fce7f3,stroke:#db2777,color:#831843
 
-    START(["START"])
+    START(["<b>START</b><br/>사용자 질문·이미지 입력"])
 
-    QP["query_preprocess_func<br/>original_query 저장"]:::fn
-    QR(["query_rewrite_agent<br/>rewritten_query 저장"]):::llm
-    IC(["intent_classification_agent<br/>rewritten_query 기준 의도 분류"]):::llm
-    IR{"intent_router<br/>브랜치 결정"}:::rt
+    QP["<b>원본 질문 정리</b><br/>사용자 입력 공백 제거<br/>원문 질문 저장"]:::fn
+    QR(["<b>대화 기반 질문 재작성</b><br/>최근 5개 대화 기반 쿼리 재작성"]):::llm
+    IC(["<b>질문 의도 분류</b><br/>문제 풀이·추천·시각화·기타 구분"]):::llm
+    IR{"<b>실행 경로 선택</b><br/>분류 결과 기반<br/>후속 처리 흐름 결정"}:::rt
 
-    SP["solver_preprocess_func<br/>rewritten_query + 이미지 전처리"]:::fn
-    SA(["solver_agent<br/>문제 풀이·해설<br/>+ google_search"]):::llm
+    SP["<b>풀이 입력 구성</b><br/>재작성 질문과 이미지 여부 조합<br/>풀이 단계 입력 생성"]:::fn
+    SA(["<b>문제 풀이·개념 설명</b><br/>이미지 문제 해설<br/>필요 시 최신 정보 검색"]):::llm
 
-    FA(["filter_agent<br/>메타 필터 생성"]):::llm
-    VS["vertex_search_func<br/>Vertex AI Search 호출"]:::fn
-    CI(["curator_intro_agent<br/>추천 소개 스트리밍"]):::llm
-    CA["build_curator_output_func<br/>문제 목록 구성"]:::fn
-    QRA(["question_refine_agent<br/>문제 형식 정제"]):::llm
+    FA(["<b>추천 검색 조건 생성</b><br/>연도·회차·문제 유형<br/>메타데이터 필터링 구성"]):::llm
+    VS["<b>관련 문제 검색</b><br/>Vertex AI Search 호출<br/>기출 문제 조회"]:::fn
+    CI(["<b>추천 진행 안내</b><br/>카드 생성 전 안내 문장<br/>요약 응답 생성"]):::llm
+    CA["<b>추천 후보 구성</b><br/>검색 결과 선별<br/>카드 표시용 데이터 생성"]:::fn
+    QRA(["<b>추천 문제 문장 정제</b><br/>문제 지문·코드 형식 정리<br/>문제 품질 개선"]):::llm
 
-    TIA(["tracer_input_agent<br/>코드 추출·언어 감지"]):::llm
-    PTI["prepare_tracer_input_func<br/>줄 번호 코드 생성"]:::fn
-    TI(["tracer_intro_agent<br/>시각화 소개 스트리밍"]):::llm
-    TA(["tracer_agent<br/>코드 한 줄씩 추적"]):::llm
+    TIA(["<b>코드 분석 입력 추출</b><br/>질문에서 코드 분리<br/>언어 정보 감지"]):::llm
+    PTI["<b>시각화 입력 정리</b><br/>분석용 코드 정리<br/>줄 번호 코드 생성"]:::fn
+    TI(["<b>분석 진행 안내</b><br/>코드 흐름 분석 전 안내 문장<br/>요약 응답 생성"]):::llm
+    TA(["<b>코드 실행 흐름 분석</b><br/>라인별 실행 추적<br/>단계별 시각화 데이터 생성"]):::llm
 
-    FB(["fallback_agent<br/>지원 불가 안내"]):::llm
+    FB(["<b>범위 밖 질문 처리</b><br/>지원 가능 기능 안내<br/>대체 안내 메시지 생성"]):::llm
 
     START --> QP --> QR --> IC --> IR
 
@@ -274,110 +256,131 @@ flowchart TD
     IR -->|recommendation| FA --> VS --> CI --> CA --> QRA
     IR -->|visualization| TIA --> PTI --> TI --> TA
     IR -->|other| FB
+
 ```
 
----
+### 워크플로우 구현 파일
 
-### 세션 & State
+#### 공통 처리
 
-`InMemoryRunner` 기반 세션 관리 및 노드 간 데이터 공유용 `state` 딕셔너리 활용. LLM Agent의 `output_key` 기반 결과 자동 저장 및 Function Node의 직접적인 state 입출력 수행.
+- [워크플로 실행 진입점](../smart_learning_agent/runner/workflow_runner.py) · `Runner`
+- [원본 질문 정리](../smart_learning_agent/nodes/common/query_rewrite.py) · `Python Function Node`
+- [대화 기반 질문 재작성](../smart_learning_agent/llm_agents/common/query_rewrite_agent.py) · `LLM Agent`
+- [질문 의도 분류](../smart_learning_agent/llm_agents/common/intent_agent.py) · `LLM Agent`
+- [실행 경로 선택](../smart_learning_agent/nodes/common/router.py) · `Router`
 
-| state 키 | 저장 주체 | 내용 |
+#### 문제 풀이·개념 설명 라우트
+
+- [풀이 입력 구성](../smart_learning_agent/nodes/solver/solver_nodes.py) · `Python Function Node`
+- [문제 풀이·개념 설명](../smart_learning_agent/llm_agents/solver/solver_agent.py) · `LLM Agent`
+
+#### 유사 문제 추천 라우트
+
+- [추천 검색 조건 생성](../smart_learning_agent/llm_agents/recommendation/filter_agent.py) · `LLM Agent`
+- [관련 문제 검색](../smart_learning_agent/nodes/recommendation/vertexai_search_nodes.py) · `Python Function Node`
+- [추천 진행 안내](../smart_learning_agent/llm_agents/recommendation/curator_intro_agent.py) · `LLM Agent`
+- [추천 후보 구성](../smart_learning_agent/nodes/recommendation/curator_output_nodes.py) · `Python Function Node`
+- [추천 문제 문장 정제](../smart_learning_agent/llm_agents/recommendation/question_refine_agent.py) · `LLM Agent`
+
+#### 코드 실행 흐름 시각화 라우트
+
+- [코드 분석 입력 추출](../smart_learning_agent/llm_agents/visualization/tracer_input_agent.py) · `LLM Agent`
+- [시각화 입력 정리](../smart_learning_agent/nodes/visualization/tracer_nodes.py) · `Python Function Node`
+- [분석 진행 안내](../smart_learning_agent/llm_agents/visualization/tracer_intro_agent.py) · `LLM Agent`
+- [코드 실행 흐름 분석](../smart_learning_agent/llm_agents/visualization/tracer_agent.py) · `LLM Agent`
+
+#### 범위 밖 질문 처리 라우트
+
+- [범위 밖 질문 처리](../smart_learning_agent/llm_agents/fallback/fallback_agent.py) · `LLM Agent`
+
+## 8️⃣ 스트림 데이터 전송 흐름
+
+ADK Workflow는 `runner/workflow_runner.py`의 `execute_agent_stream()`에서 아래 설정으로 실행.
+
+```py
+RunConfig(
+    streaming_mode=StreamingMode.SSE
+)
+```
+
+프론트엔드는 `/chat/stream`으로 요청을 한 번 보내고, 백엔드는 연결을 유지한 채 ADK Workflow 이벤트를 SSE 형식으로 순차 전송.
+
+```text
+Frontend
+  -> POST /chat/stream
+FastAPI
+  -> runner.execute_agent_stream(...)
+ADK Runner
+  -> workflow_runner.run_async(streaming_mode=SSE)
+ADK Workflow
+  -> 원본 ADK Event 반환
+FastAPI
+  -> ADK Event를 state/chunk/curation/tracer/done 등으로 변환
+Frontend
+  -> 상태 말풍선, 답변 청크, 추천 카드, 시각화 결과 표시
+```
+
+### SSE 이벤트 타입
+
+| `type` | 의미 | 프론트 처리 |
 |---|---|---|
-| `has_image` | 세션 초기화 | 이미지 첨부 여부. |
-| `original_query` | `query_preprocess_func` | 원본 사용자 입력값. 재작성 결과로 덮어쓰지 않음. |
-| `rewritten_query` | `query_rewrite_agent` | 멀티턴 맥락을 반영한 재작성 질문. 이후 의도 분류와 분기 처리의 기준값. |
-| `intent_output` | `intent_classification_agent` | `rewritten_query` 기반으로 분류된 의도 결과. |
-| `solver_query` | `solver_preprocess_func` | `rewritten_query`와 이미지 첨부 여부를 조합한 Solver 입력값. |
-| `vertex_filter_output` | `filter_agent` | Vertex AI Search 메타 필터. 검색어는 `rewritten_query`를 그대로 사용. |
-| `solver_output` | `solver_agent` | 문제 풀이 결과. |
-| `curator_output` | `build_curator_output_func` | 선별된 문제 목록. |
-| `refine_output` | `question_refine_agent` | 정제된 문제 카드 데이터. |
-| `problem_cards` | `build_curation_callback` | 최종 추천 카드 목록. |
-| `tracer_input` | `tracer_input_agent` | `rewritten_query`에서 LLM이 추출한 코드와 언어. |
-| `tracer_code` | `prepare_tracer_input_func` | 실행 흐름 분석 대상 코드. |
-| `tracer_code_numbered` | `prepare_tracer_input_func` | 줄 번호가 붙은 분석 대상 코드. |
-| `detected_language` | `prepare_tracer_input_func` | 감지된 코드 언어. |
-| `tracer_output` | `tracer_agent` | 코드 추적 결과 데이터. |
+| `state` | 현재 실행 중인 처리 단계. 새 단계를 처음 만났을 때 전송. | 상태 말풍선/로딩 문구 갱신. |
+| `chunk` | 사용자에게 보여줄 텍스트 조각. | 채팅 말풍선에 텍스트 누적. |
+| `stream_end` | 한 스트리밍 노드의 텍스트 출력 종료. 전체 요청 종료와 구분. | 현재 말풍선 스트리밍 종료 처리. |
+| `curation` | 추천 문제 카드 최종 데이터. | 추천 카드 UI 렌더링. |
+| `tracer` | 코드 실행 흐름 최종 데이터. | Tracer 시각화 UI 렌더링. |
+| `error` | 사용자에게 보여줄 오류 메시지. | 오류 말풍선 표시. |
+| `done` | 전체 `/chat/stream` 요청 종료. | 요청 마무리. |
 
----
+### 샘플 예시
 
-### Artifact (이미지)
+사용자 질문: `C언어 이중 포인터 문제 알려줘`
 
-이미지 업로드 시 두 가지 경로로 처리 수행.
-1. `artifact_service.save_artifact()`: 세션에 이미지 바이너리 저장 (`uploaded_image.jpg`).
-2. `types.Part(inline_data=...)`: Content에 직접 포함하여 `solver_agent` 멀티모달 참조 지원.
+추천 요청에서 실제 SSE 이벤트는 아래 순서로 전송.
 
----
+```text
+data: {"type":"state","node":"query_preprocess_func"}
+-> 프론트: "질문을 정리하는 중이에요..."
 
-### App & Runner
+data: {"type":"state","node":"query_rewrite_agent"}
+-> 프론트: "질문을 다듬는 중이에요..."
 
-`App`의 `root_agent` 래핑 및 `InMemoryRunner` 기반 실행 관리. 세션 생성, Content 구성, `run_async()` 호출을 통한 이벤트 스트림 반환 프로세스 수행.
+data: {"type":"state","node":"intent_classification_agent"}
+-> 프론트: "질문 의도를 파악하는 중이에요..."
 
----
+data: {"type":"state","node":"intent_router"}
+-> 프론트: "질문 의도를 파악하는 중이에요..."
 
-### 스트리밍 (SSE)
+data: {"type":"state","node":"filter_agent"}
+-> 프론트: "추천 결과를 필터링하는 중이에요..."
 
-`RunConfig(streaming_mode=StreamingMode.SSE)` 기반 LLM 응답 토큰 단위 스트리밍 구현. `curator_intro_agent` 및 `tracer_intro_agent`를 통한 스트리밍 전용 소개 메시지 출력 활용.
+data: {"type":"state","node":"vertex_search_func"}
+-> 프론트: "관련 문제를 검색하는 중이에요..."
 
----
+data: {"type":"state","node":"curator_intro_agent"}
+-> 프론트: 추천 안내 문장 말풍선 준비
 
-### 비용 최적화
+data: {"type":"chunk","text":"C언어 이중 포인터를 연습할 수 있는 "}
+-> 프론트: 채팅 말풍선에 텍스트 누적
 
-- **ContextCacheConfig**: 대형 시스템 프롬프트 캐싱을 통한 입력 토큰 비용 절감 (`min_tokens=2048`, `ttl_seconds=600`, `cache_intervals=5`).
-- **EventsCompactionConfig**: 장기 세션 이벤트 기록의 LLM 요약·압축을 통한 컨텍스트 윈도우 절약 (`compaction_interval=5`, `token_threshold=8000`, `event_retention_size=10`).
+data: {"type":"chunk","text":"문제를 찾아보고 있어요. "}
+-> 프론트: 채팅 말풍선에 텍스트 누적
 
----
+data: {"type":"chunk","text":"주소 참조와 간접 참조를 중심으로 추천해드릴게요."}
+-> 프론트: 채팅 말풍선에 텍스트 누적
 
-## FastAPI 래핑
+data: {"type":"stream_end"}
+-> 프론트: 안내 문장 스트리밍 종료
 
-`api/app.py`를 통한 ADK 워크플로우의 HTTP API 노출 수행.
+data: {"type":"state","node":"build_curator_output_func"}
+-> 프론트: "결과를 보기 좋게 정리하는 중이에요..."
 
-### 엔드포인트
+data: {"type":"state","node":"question_refine_agent"}
+-> 프론트: "문제를 다듬는 중이에요..."
 
-| 메서드 | 경로 | 설명 |
-|---|---|---|
-| `POST` | `/chat` | 비스트리밍 결과 JSON 반환. |
-| `POST` | `/chat/stream` | SSE 스트리밍 실시간 전송. |
-| `GET` | `/health` | 서버 상태 확인. |
+data: {"type":"curation","route":"recommendation","title":"맞춤 추천 문제 카드","problemCards":[...],"message":null}
+-> 프론트: 추천 카드 UI 표시
 
----
-
-### 응답 타입
-
-라우팅 결과에 따른 `type` 필드 가변 적용.
-- `type: "text"`: 문제 해설 및 fallback 응답.
-- `type: "curation"`: 유사 문제 추천 카드 데이터.
-- `type: "tracer"`: 코드 실행 흐름 시각화 데이터.
-
----
-
-### SSE 이벤트 구조 (`/chat/stream`)
-
-| `type` | 설명 |
-|---|---|
-| `state` | 현재 처리 중인 노드 정보. |
-| `chunk` | 텍스트 스트리밍 조각 (solver·intro·fallback 노드). |
-| `curation` | 추천 문제 카드 완성 데이터. |
-| `tracer` | 코드 추적 완성 데이터. |
-| `done` | 완료 신호. |
-| `error` | 오류 메시지. |
-
----
-
-## 스트리밍 데이터 전송 흐름
-
-### ADK 측 — `StreamingMode.SSE`
-
-`execute_agent_stream()`을 통한 `RunConfig` 적용 및 `run_async()` 호출. LLM 토큰 생성 즉시 `event.partial = True` 이벤트 및 텍스트 조각, 노드 이름 반환 수행.
-
-### FastAPI 측 — `StreamingResponse`
-
-SSE 형식 클라이언트 푸시 관리. 새 노드 진입 시 `state` 전송 및 허용 노드 대상 `chunk` 전송 수행. 워크플로우 완료 후 `curation` 또는 `tracer` 데이터 및 `done` 신호 전송.
-
-### 스트리밍 허용 노드 (`_STREAM_NODES`)
-
-불필요 정보 노출 방지를 위한 특정 노드 기반 `chunk` 전송 제한.
-- `solver_agent`: 문제 풀이 본문.
-- `tracer_intro_agent` / `curator_intro_agent`: 시각화/추천 시작 전 소개 메시지.
-- `fallback_agent`: 지원 불가 안내 메시지.
+data: {"type":"done"}
+-> 프론트: 요청 종료
+```

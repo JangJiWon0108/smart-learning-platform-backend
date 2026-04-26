@@ -15,17 +15,17 @@ FastAPI 엔드포인트, SSE 응답 변환, 프론트엔드 전송 포맷은 의
 ```text
 START
   -> query_preprocess_func          # state["original_query"] 저장
-  -> query_rewrite_agent            # state["rewritten_query"] 저장
-  -> intent_classification_agent    # rewritten_query 기준 의도 분류
+  -> query_rewrite_agent            # 최근 5개 대화 기반 질문 재작성
+  -> intent_classification_agent    # 재작성된 질문 기준 의도 분류
   -> intent_router
 
 intent_router 분기:
   solver
-    -> solver_preprocess_func       # rewritten_query + has_image -> solver_query
+    -> solver_preprocess_func       # 재작성된 질문 + has_image -> solver_query
     -> solver_agent
 
   recommendation
-    -> filter_agent                 # rewritten_query -> Vertex 검색 조건
+    -> filter_agent                 # 재작성된 질문 -> Vertex 검색 조건
     -> vertex_search_func
     -> curator_intro_agent
     -> build_curator_output_func    # 검색 결과 -> curator_output
@@ -33,14 +33,14 @@ intent_router 분기:
     -> build_curation_callback
 
   visualization
-    -> tracer_input_agent          # rewritten_query에서 코드 추출/언어 감지
+    -> tracer_input_agent          # 재작성된 질문에서 코드 추출/언어 감지
     -> prepare_tracer_input_func   # tracer_code_numbered 생성
     -> tracer_intro_agent
     -> tracer_agent
     -> normalize_tracer_callback
 
   other
-    -> fallback_agent               # rewritten_query 기준 범위 밖 응답
+    -> fallback_agent               # 재작성된 질문 기준 범위 밖 응답
 ```
 
 `agent.py`에서 특히 확인할 부분은 세 가지입니다.
@@ -65,13 +65,13 @@ intent_router 분기:
 
 ### `llm_agents/common/query_rewrite_agent.py`
 
-멀티턴 대화 맥락을 반영해 질문을 독립적으로 이해 가능한 문장으로 재작성합니다.
+최근 대화 5개를 참고해 현재 질문을 독립적으로 이해 가능한 문장으로 재작성합니다.
 
-중요한 점은 `output_key="rewritten_query"`입니다. 즉, 처음 저장된 `original_query`는 원본 입력으로 보존되고, 재작성 결과는 `rewritten_query`에 따로 저장됩니다. 이후 라우팅과 각 분기는 `rewritten_query`를 기준으로 동작합니다.
+예를 들어 이전 대화에서 특정 개념을 다룬 뒤 사용자가 “그게 뭐야?”처럼 맥락 의존 질문을 하면, 해당 주제를 포함한 독립형 질문으로 바꿉니다. 이후 라우팅과 각 분기는 이 재작성된 질문을 기준으로 동작합니다.
 
 ### `llm_agents/common/intent_agent.py`
 
-`rewritten_query`를 보고 의도를 분류합니다.
+재작성된 질문을 보고 의도를 분류합니다.
 
 출력은 `schemas/intent_output.py`의 `IntentOutput` 스키마를 따르며, 결과는 `state["intent_output"]`에 저장됩니다.
 
@@ -105,13 +105,13 @@ route = [intent_output.intent]
 
 ### `nodes/solver/solver_nodes.py`
 
-`solver_preprocess_func`는 `rewritten_query`와 `has_image`를 받아 Solver Agent에 넘길 `solver_query`를 만듭니다.
+`solver_preprocess_func`는 재작성된 질문과 `has_image`를 받아 Solver Agent에 넘길 `solver_query`를 만듭니다.
 
 처리 규칙은 다음과 같습니다.
 
 - 이미지 있고 텍스트 없음: `[이미지에 포함된 문제를 풀어주세요]`
-- 이미지와 텍스트 모두 있음: `[이미지 첨부됨] {rewritten_query}`
-- 텍스트만 있음: `rewritten_query`
+- 이미지와 텍스트 모두 있음: `[이미지 첨부됨] {재작성된 질문}`
+- 텍스트만 있음: 재작성된 질문
 
 결과는 `state["solver_query"]`에 저장됩니다.
 
@@ -142,7 +142,7 @@ route = [intent_output.intent]
 
 ### `llm_agents/recommendation/filter_agent.py`
 
-`rewritten_query`에 담긴 추천 요청에서 Vertex AI Search에 사용할 메타 필터만 만듭니다. 실제 시맨틱 검색어는 `rewritten_query`를 그대로 사용합니다.
+재작성된 추천 요청에서 Vertex AI Search에 사용할 메타 필터만 만듭니다. 실제 시맨틱 검색어도 이 재작성된 질문을 그대로 사용합니다.
 
 출력은 `VertexFilterOutput`이고 `state["vertex_filter_output"]`에 저장됩니다.
 
@@ -154,12 +154,12 @@ route = [intent_output.intent]
 
 ### `nodes/recommendation/vertexai_search_nodes.py`
 
-`vertex_search_func`가 `vertex_filter_output`과 `rewritten_query`를 받아 실제 Vertex AI Search를 호출합니다.
+`vertex_search_func`가 `vertex_filter_output`과 재작성된 질문을 받아 실제 Vertex AI Search를 호출합니다.
 
 이 노드에서 외부 검색이 일어나며, 결과는 다음 state로 저장됩니다.
 
 - `rec_search_results`: 검색된 문제 목록
-- `rec_query`: 검색에 사용한 `rewritten_query`
+- `rec_query`: 검색에 사용한 재작성된 질문
 - `rec_subject`: 검색한 문제 유형 표시값 (`c`, `java`, `python`, `sql`, `concept` 또는 `전체`)
 
 ### `llm_agents/recommendation/curator_intro_agent.py`
@@ -211,7 +211,7 @@ FastAPI/SSE를 제외하고도 이 콜백은 ADK workflow의 중요한 후처리
 
 ### `llm_agents/visualization/tracer_input_agent.py`
 
-`tracer_input_agent`가 `rewritten_query`에서 실행 흐름 분석 대상 코드만 추출하고 언어를 감지합니다.
+`tracer_input_agent`가 재작성된 질문에서 실행 흐름 분석 대상 코드만 추출하고 언어를 감지합니다.
 
 마크다운 코드 블록이 없어도 자연어에 섞인 코드 조각을 분리할 수 있도록 LLM Agent로 처리합니다. 예를 들어 `그냥 아래 코드 순서 모르겠어 a=[1,2] a.append(2)` 같은 입력에서 자연어를 제거하고 Python 코드만 추출합니다.
 
@@ -265,7 +265,7 @@ state["tracer_code"] 각 라인 -> state["tracer_output"]["steps"][i]["code"]
 
 볼 파일은 `llm_agents/fallback/fallback_agent.py`입니다.
 
-`fallback_agent`는 `rewritten_query` 기준으로 질문에 짧게 답하거나 도움 불가를 안내한 뒤, 서비스의 세 가지 핵심 기능으로 유도합니다.
+`fallback_agent`는 재작성된 질문 기준으로 질문에 짧게 답하거나 도움 불가를 안내한 뒤, 서비스의 세 가지 핵심 기능으로 유도합니다.
 
 결과는 `state["fallback_output"]`에 저장됩니다.
 
@@ -292,7 +292,31 @@ _app = App(
 workflow_runner = InMemoryRunner(app=_app)
 ```
 
-현재 구현은 메모리 기반 세션/아티팩트 러너를 사용합니다.
+현재 구현은 Google ADK의 `InMemoryRunner`를 사용합니다.
+
+`InMemoryRunner` 안에는 인메모리 기반 `session_service`와 `artifact_service`가 포함됩니다. 따라서 별도 DB, Redis, GCS 같은 외부 저장소를 붙이지 않은 상태입니다.
+
+정리하면 현재 저장소 성격은 다음과 같습니다.
+
+- Runner: `InMemoryRunner`
+- Session Service: `InMemoryRunner`에 포함된 인메모리 `session_service`
+- Session/State: 서버 프로세스 메모리에 저장되는 인메모리 세션과 `session.state`
+- Artifact Service: `InMemoryRunner`에 포함된 인메모리 `artifact_service`
+
+구조로 보면 다음과 같습니다.
+
+```text
+InMemoryRunner
+├─ App / root_agent 실행
+├─ session_service
+│  └─ 인메모리 세션 저장
+│     └─ session.state
+└─ artifact_service
+   └─ 인메모리 아티팩트 저장
+      └─ uploaded_image.jpg
+```
+
+이 구조는 개발/단일 서버 실행에는 간단하지만, 서버 재시작 시 세션과 아티팩트가 사라지고 여러 서버 인스턴스 간에는 공유되지 않습니다.
 
 ### Content 준비
 
@@ -332,92 +356,3 @@ run_config=RunConfig(streaming_mode=StreamingMode.SSE, max_llm_calls=30)
 
 SSE 이벤트를 HTTP 응답으로 바꾸는 상위 레이어는 제외합니다.
 
-## 8. 폴더별 역할 요약
-
-| 경로 | 역할 | 먼저 볼 필요 |
-| --- | --- | --- |
-| `smart_learning_agent/agent.py` | ADK `Workflow` 그래프 정의 | 가장 먼저 |
-| `smart_learning_agent/runner/` | `root_agent`를 ADK `App`/`InMemoryRunner`로 실행 | 마지막 |
-| `smart_learning_agent/nodes/common/` | 공통 전처리 및 라우팅 노드 | 공통 흐름 |
-| `smart_learning_agent/nodes/{solver,recommendation,visualization}/` | 라우트별 Python 함수 기반 워크플로우 노드 | 분기별로 |
-| `smart_learning_agent/llm_agents/common/` | 공통 LLM Agent(query rewrite, intent) | 공통 흐름 |
-| `smart_learning_agent/llm_agents/{solver,recommendation,visualization,fallback}/` | 라우트별 Gemini 기반 ADK `Agent` 정의 | 노드 다음 |
-| `smart_learning_agent/schemas/` | LLM Agent 구조화 출력 스키마 | Agent와 함께 |
-| `smart_learning_agent/callbacks/` | Agent 실행 후 state 후처리 | 해당 Agent 다음 |
-| `smart_learning_agent/artifacts/` | 이미지 아티팩트 저장 | Solver 이미지 흐름 확인 시 |
-
-## 9. 추천 코드 분석 순서
-
-처음부터 전체를 따라갈 때는 아래 순서를 추천합니다.
-
-1. `smart_learning_agent/agent.py`
-2. `smart_learning_agent/nodes/common/query_rewrite.py`
-3. `smart_learning_agent/llm_agents/common/query_rewrite_agent.py`
-4. `smart_learning_agent/llm_agents/common/intent_agent.py`
-5. `smart_learning_agent/schemas/intent_output.py`
-6. `smart_learning_agent/nodes/common/router.py`
-7. `smart_learning_agent/nodes/solver/solver_nodes.py`
-8. `smart_learning_agent/llm_agents/solver/solver_agent.py`
-9. `smart_learning_agent/llm_agents/recommendation/filter_agent.py`
-10. `smart_learning_agent/schemas/curator_output.py`
-11. `smart_learning_agent/nodes/recommendation/vertexai_search_nodes.py`
-12. `smart_learning_agent/llm_agents/recommendation/curator_intro_agent.py`
-13. `smart_learning_agent/nodes/recommendation/curator_output_nodes.py`
-14. `smart_learning_agent/llm_agents/recommendation/question_refine_agent.py`
-15. `smart_learning_agent/schemas/refine_output.py`
-16. `smart_learning_agent/callbacks/problem_cards_callback.py`
-17. `smart_learning_agent/nodes/visualization/tracer_nodes.py`
-18. `smart_learning_agent/llm_agents/visualization/tracer_intro_agent.py`
-19. `smart_learning_agent/llm_agents/visualization/tracer_agent.py`
-20. `smart_learning_agent/schemas/tracer_output.py`
-21. `smart_learning_agent/callbacks/tracer_output_callback.py`
-22. `smart_learning_agent/llm_agents/fallback/fallback_agent.py`
-23. `smart_learning_agent/artifacts/image.py`
-24. `smart_learning_agent/runner/workflow_runner.py`
-
-이 순서로 보면 `Workflow`의 큰 그래프에서 시작해, 공통 전처리, 라우팅, 각 분기, 후처리 콜백, 마지막 실행 runner까지 자연스럽게 이어집니다.
-
-## 10. 분석할 때 기억할 핵심 state
-
-ADK workflow는 파일 간 직접 반환값보다 state 키를 통해 흐름을 이어가는 부분이 많습니다. 아래 키들을 추적하면 전체 흐름이 훨씬 잘 보입니다.
-
-| state key | 생성 위치 | 사용 위치 |
-| --- | --- | --- |
-| `original_query` | `query_preprocess_func` | 원본 입력 보존, `query_rewrite_agent` 입력 |
-| `rewritten_query` | `query_rewrite_agent` | 의도 분류와 각 분기 처리의 기준 질문 |
-| `intent_output` | `intent_classification_agent` | `intent_router` |
-| `current_route` | `intent_router` | 실행 상태 확인용 |
-| `has_image` | `prepare_content` | `solver_preprocess_func` |
-| `solver_query` | `solver_preprocess_func` | `solver_agent` |
-| `solver_output` | `solver_agent` | 최종 Solver 결과 |
-| `vertex_filter_output` | `filter_agent` | `vertex_search_func` |
-| `rec_search_results` | `vertex_search_func` | `curator_intro_agent`, `build_curator_output_func` |
-| `curator_output` | `build_curator_output_func` | `question_refine_agent`, `build_curation_callback` |
-| `refine_output` | `question_refine_agent` | `build_curation_callback` |
-| `problem_cards` | `build_curation_callback` | 추천 결과 UI 데이터 |
-| `tracer_input` | `tracer_input_agent` | `prepare_tracer_input_func` |
-| `tracer_code` | `prepare_tracer_input_func` | `tracer_intro_agent`, `tracer_agent`, `normalize_tracer_callback` |
-| `tracer_code_numbered` | `prepare_tracer_input_func` | `tracer_agent` |
-| `detected_language` | `prepare_tracer_input_func` | `tracer_intro_agent`, `tracer_agent` |
-| `tracer_output` | `tracer_agent`, `normalize_tracer_callback` | 코드 시각화 결과 |
-| `fallback_output` | `fallback_agent` | 범위 밖 질문 응답 |
-
-## 11. FastAPI/SSE 제외 기준
-
-이번 분석에서 제외해도 되는 부분은 다음입니다.
-
-- FastAPI route 함수
-- HTTP request/response 변환
-- SSE event formatting
-- `StreamingMode.SSE` 이후의 프론트 전송 방식
-- `UploadFile`의 HTTP 예외 처리 세부사항
-
-반대로 ADK 흐름 이해를 위해 포함해야 하는 runner 부분은 다음입니다.
-
-- `root_agent`를 `App`에 연결하는 부분
-- `InMemoryRunner` 생성
-- 세션 state 초기화
-- `types.Content`와 `types.Part` 구성
-- `workflow_runner.run_async(...)` 호출
-
-즉, `workflow_runner.py`는 전부 버리는 파일이 아니라, HTTP/SSE 표면을 걷어내고 ADK 실행 진입점만 보면 됩니다.

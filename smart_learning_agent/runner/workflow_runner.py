@@ -2,6 +2,16 @@
 Google ADK 에이전트 실행 및 세션 관리 모듈
 
 FastAPI 엔드포인트 호출을 통한 에이전트 워크플로우 실행 및 원본 결과 이벤트 반환
+
+현재 구현은 Google ADK `App`에 `root_agent`를 등록하고,
+`InMemoryRunner`로 워크플로우를 실행합니다.
+
+`session_service`는 `InMemoryRunner`에 포함된 인메모리 세션 서비스를 사용합니다.
+따라서 세션과 `session.state`는 서버 프로세스 메모리에 저장되며,
+서버 재시작 또는 다중 인스턴스 환경에서는 공유·영속화되지 않습니다.
+
+이미지 업로드 시에는 ADK `artifact_service`로 세션 아티팩트를 저장하고,
+동시에 `types.Part(inline_data=...)`로 현재 요청 Content에도 포함합니다.
 """
 
 # ─── 모듈 임포트 ───────────────────────────────────────────────────────────
