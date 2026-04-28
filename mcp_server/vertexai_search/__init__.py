@@ -1,17 +1,19 @@
-"""Vertex AI Search: 전처리 NDJSON 생성, 업로드, 검색."""
+"""Vertex AI Search MCP server implementation."""
 
-from .build_vertexai_datastore import build_jsonl
-from .search_vertexai import (
+from .search import (
     VertexExamSearchMetadata,
     build_vertex_exam_filter_expression,
+    parse_vertex_results,
     retrieve_vertexai_search,
+    search_exam_questions,
     search_vertex_exam,
 )
 
 __all__ = [
     "VertexExamSearchMetadata",
-    "build_jsonl",
     "build_vertex_exam_filter_expression",
+    "parse_vertex_results",
     "retrieve_vertexai_search",
+    "search_exam_questions",
     "search_vertex_exam",
 ]

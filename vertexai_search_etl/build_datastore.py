@@ -1,12 +1,7 @@
 """
-정보처리기사 실기 원본 JSONL → data/vector_store_vertexai.jsonl.
-
-각 문제를 Gemini로 분류(concept/code + 언어)해서 structData에 포함.
-이미지 의존 행은 제외.
-
-실행 (backend 디렉터리에서):
-  uv run python -m vertexai_search.build_vertexai_datastore
+정보처리기사 실기 원본 JSONL을 Vertex AI Search 적재용 NDJSON으로 변환합니다.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -20,23 +15,19 @@ from config.properties import BASE_DIR
 from log.logger import get_logger
 
 from .question_classifier import classify_question
+from .schemas import DatastoreBuildResponse
 
-# ─── 전역 상태 및 로거 설정 ───
-
-# NDJSON 생성 진행 상황과 결과를 기록하기 위한 로거
 _logger = get_logger("build_vertexai_jsonl")
 
 
-# ─── 헬퍼 함수 ───
-
 def _document_id(legacy_id: str) -> str:
-    s = str(legacy_id).strip()
-    m = re.fullmatch(r"(\d{4})_(\d{1,2})_(\d{1,3})", s)
-    if m:
-        y, r, q = m.groups()
-        raw = f"doc-y{y}-r{int(r):02d}-q{int(q):02d}"
+    text = str(legacy_id).strip()
+    match = re.fullmatch(r"(\d{4})_(\d{1,2})_(\d{1,3})", text)
+    if match:
+        year, round_number, question_number = match.groups()
+        raw = f"doc-y{year}-r{int(round_number):02d}-q{int(question_number):02d}"
     else:
-        raw = re.sub(r"[^A-Za-z0-9-]", "-", s)
+        raw = re.sub(r"[^A-Za-z0-9-]", "-", text)
         raw = re.sub(r"-+", "-", raw).strip("-").lower()
         if not raw:
             raise ValueError(f"empty id from {legacy_id!r}")
@@ -50,9 +41,9 @@ def _document_id(legacy_id: str) -> str:
 def _build_content(row: dict[str, Any]) -> str:
     parts = [f"[문제] {row.get('question', '')}".rstrip()]
     parts.append(f"[정답] {row.get('answer', '')}".rstrip())
-    exp = str(row.get("explanation", "") or "").strip()
-    if exp:
-        parts.append(f"[해설] {exp}".rstrip())
+    explanation = str(row.get("explanation", "") or "").strip()
+    if explanation:
+        parts.append(f"[해설] {explanation}".rstrip())
     return "\n".join(parts)
 
 
@@ -61,31 +52,26 @@ def _has_image(row: dict[str, Any]) -> bool:
 
 
 def _iter_jsonl(path: Path) -> Iterator[dict[str, Any]]:
-    with path.open(encoding="utf-8") as f:
-        for lineno, line in enumerate(f, 1):
+    with path.open(encoding="utf-8") as file:
+        for lineno, line in enumerate(file, 1):
             line = line.strip()
             if not line:
                 continue
             try:
                 yield json.loads(line)
-            except json.JSONDecodeError as e:
-                raise ValueError(f"{path} 라인 {lineno}: {e}") from e
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{path} 라인 {lineno}: {exc}") from exc
 
-
-# ─── 메인 파이프라인 ───
 
 def build_jsonl(input_path: Path, output: TextIO) -> tuple[int, int]:
+    """Build Vertex AI Search NDJSON records from the source question JSONL."""
     written = skipped = 0
     for row in _iter_jsonl(input_path):
-        # 1단계: 이미지 의존 문항 스킵
         if _has_image(row):
             skipped += 1
             continue
 
-        # 2단계: Gemini 분류기 호출 (개념/코드 문제 판별)
         labels = classify_question(str(row.get("question", "")))
-
-        # 3단계: Vertex AI Search 스키마 규격(structData)으로 JSON 레코드 구성
         doc_id = _document_id(str(row.get("id", "")))
         record = {
             "documentId": doc_id,
@@ -100,34 +86,56 @@ def build_jsonl(input_path: Path, output: TextIO) -> tuple[int, int]:
                 **labels,
             },
         }
-        
-        # 4단계: NDJSON 파일에 쓰기
+
         output.write(json.dumps(record, ensure_ascii=False) + "\n")
         written += 1
-        _logger.info("[%d] %s → %s", written, row.get("id", "?"), labels["question_type"])
+        _logger.info("[%d] %s -> %s", written, row.get("id", "?"), labels["question_type"])
 
     _logger.info("완료: %d건 기록 / %d건 스킵(이미지)", written, skipped)
     return written, skipped
 
 
-# ─── 스크립트 실행부 ───
+def build_vertexai_datastore(
+    input_path: str | None = None,
+    output_path: str | None = None,
+) -> dict[str, Any]:
+    """Build a Vertex AI Search NDJSON file and return a summary."""
+    source_path = Path(input_path) if input_path else BASE_DIR / "data" / "정보처리기사_실기_기출문제.jsonl"
+    target_path = Path(output_path) if output_path else BASE_DIR / "data" / "vector_store_vertexai.jsonl"
+    if not source_path.is_file():
+        raise FileNotFoundError(f"입력 없음: {source_path}")
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    with target_path.open("w", encoding="utf-8") as file:
+        written, skipped = build_jsonl(source_path, file)
+
+    return DatastoreBuildResponse(
+        input_path=str(source_path),
+        output_path=str(target_path),
+        written=written,
+        skipped=skipped,
+    ).model_dump()
+
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("input", type=Path, nargs="?", default=None)
-    p.add_argument("-o", "--output", type=Path, default=None)
-    args = p.parse_args()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("input", type=Path, nargs="?", default=None)
+    parser.add_argument("-o", "--output", type=Path, default=None)
+    args = parser.parse_args()
 
-    inp = args.input or (BASE_DIR / "data" / "정보처리기사_실기_기출문제.jsonl")
-    out = args.output or (BASE_DIR / "data" / "vector_store_vertexai.jsonl")
-    if not inp.is_file():
-        print(f"입력 없음: {inp}", file=sys.stderr)
+    try:
+        result = build_vertexai_datastore(
+            str(args.input) if args.input else None,
+            str(args.output) if args.output else None,
+        )
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
         return 1
 
-    Path(out).parent.mkdir(parents=True, exist_ok=True)
-    with open(out, "w", encoding="utf-8") as fh:
-        n, sk = build_jsonl(inp, fh)
-    print(f"완료: {n}건 (이미지 스킵 {sk}) → {out}")
+    print(
+        f"완료: {result['written']}건 "
+        f"(이미지 스킵 {result['skipped']}) -> {result['output_path']}"
+    )
     return 0
 
 

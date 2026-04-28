@@ -124,7 +124,7 @@ Tistory 포스트 구조 분석 기반 데이터 추출 규칙 적용.
 
 ## 5️⃣ 임베딩 전략
 
-크롤링 결과 가공을 통한 Vertex AI Search 적재용 문서 구성 (`vertexai_search/build_vertexai_datastore.py`).
+크롤링 결과 가공을 통한 Vertex AI Search 적재용 문서 구성 (`vertexai_search_etl/build_datastore.py`).
 
 ### 기본 원칙
 
