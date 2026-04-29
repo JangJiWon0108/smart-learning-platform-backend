@@ -53,7 +53,7 @@ def get_logger(name: str) -> logging.Logger:
 
     logger.addHandler(console_handler)
 
-    # 부모 로거로 이벤트가 전파되지 않도록 막습니다
+    # 부모 로거로 이벤트 전파 차단
     # (설정 안 하면 루트 로거에서 로그가 두 번 출력될 수 있음)
     logger.propagate = False
 

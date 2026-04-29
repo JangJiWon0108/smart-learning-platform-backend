@@ -19,7 +19,7 @@ tracer_intro_agent = Agent(
     name="tracer_intro_agent",
     model=settings.GEMINI_MODEL_TYPE_TRACER_INTRO,
     generate_content_config=GEMINI_GENERATE_CONTENT_RETRY_CONFIG,
-    # 소개 텍스트를 "tracer_intro" 키로 state에 저장합니다
+    # state 키: tracer_intro에 소개 텍스트 저장
     output_key="tracer_intro",
     description="코드 시각화 결과 안내 텍스트 생성 에이전트",
     instruction="""

@@ -20,21 +20,21 @@ curator_intro_agent = Agent(
     name="curator_intro_agent",
     model=settings.GEMINI_MODEL_TYPE_CURATOR_INTRO,
     generate_content_config=GEMINI_GENERATE_CONTENT_RETRY_CONFIG,
-    # 소개 텍스트를 "curator_intro" 키로 state에 저장합니다
+    # output_key curator_intro: 스트리밍 소개 문구
     output_key="curator_intro",
     description="추천 결과를 친화적으로 요약해서 먼저 스트리밍한다.",
     instruction="""
-당신은 정보처리기사 실기 문제 추천 결과를 '사용자에게 친화적으로' 소개하는 진행자입니다.
+당신은 정보처리기사 실기 문제 추천 결과를 사용자에게 친화적으로 소개하는 진행자입니다.
 
 검색어: {rec_query?}
 문제 유형: {rec_subject?}
 Vertex AI Search 검색 결과: {rec_search_results?}
 
 요구사항:
-- 첫 줄에서 "추천 문제를 N개 찾았어요"처럼 친화적으로 시작하세요. (N은 rec_search_results 길이 또는 0)
-- 취약점/주제(예: C언어 이중 포인터)를 1문장으로 정리하세요.
-- 스포일러 방지를 위해 정답/해설/출력값은 절대 말하지 마세요.
-- 마지막에 "아래 카드에서 지문/코드를 확인해요" 같은 다음 행동을 유도하세요.
-- 마크다운/코드블록 없이, 자연어 텍스트만 출력하세요.
-""",
+- 첫 줄: "추천 문제를 N개 찾았어요" 형태로 친화적 시작 (N = rec_search_results 길이 또는 0)
+- 취약점·주제 1문장 요약 (예: C언어 이중 포인터)
+- 정답·해설·출력값 언급 금지(스포일러 방지)
+- 마지막: "아래 카드에서 지문/코드 확인" 등 다음 행동 유도
+- 마크다운·코드블록 없이 자연어만
+""".strip(),
 )

@@ -1,28 +1,25 @@
-"""Client adapter for calling the local Vertex AI Search MCP server."""
+"""
+Vertex AI Search MCP 서버(streamable-http) 호출용 클라이언트 어댑터.
+
+ADK 외부에서 동일 MCP를 직접 호출할 때 사용. 운영 추천 경로는 ADK McpToolset이 담당.
+"""
 
 from __future__ import annotations
 
+# ─── 모듈 임포트 ───────────────────────────────────────────────────────────
 import json
-import sys
-from pathlib import Path
 from typing import Any
 
 from mcp import ClientSession
-from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.client.streamable_http import streamable_http_client
 from mcp.types import TextContent
 
-_BACKEND_ROOT = Path(__file__).resolve().parents[2]
+from config.properties import Settings
 
 
-def _server_params() -> StdioServerParameters:
-    return StdioServerParameters(
-        command=sys.executable,
-        args=["-m", "mcp_server.vertexai_search.server"],
-        cwd=_BACKEND_ROOT,
-    )
-
-
-def _extract_tool_response(result: Any) -> dict[str, Any]:
+# ─── 헬퍼 함수 ─────────────────────────────────────────────────────────────
+def _tool_result(result: Any) -> dict[str, Any]:
+    """CallToolResult에서 dict 페이로드 추출. 오류 시 RuntimeError."""
     if result.isError:
         messages = [
             content.text
@@ -42,12 +39,27 @@ def _extract_tool_response(result: Any) -> dict[str, Any]:
 
 
 async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Call a Vertex AI Search MCP tool through a short-lived stdio session."""
-    async with stdio_client(_server_params()) as (read_stream, write_stream):
+    """
+    streamable-http로 MCP tool 1회 호출.
+
+    Args:
+        name: tool 이름
+        arguments: tool 인자 dict
+
+    Returns:
+        structuredContent 또는 text JSON 파싱 결과 dict
+    """
+    settings = Settings()
+    url = settings.VERTEXAI_SEARCH_MCP_URL
+    async with streamable_http_client(url, terminate_on_close=True) as (
+        read_stream,
+        write_stream,
+        _get_sid,
+    ):
         async with ClientSession(read_stream, write_stream) as session:
             await session.initialize()
             result = await session.call_tool(name, arguments=arguments)
-            return _extract_tool_response(result)
+            return _tool_result(result)
 
 
 async def search_exam_questions(
@@ -61,7 +73,22 @@ async def search_exam_questions(
     question_numbers: list[int] | None = None,
     page_size: int = 3,
 ) -> dict[str, Any]:
-    """Search exam questions through the MCP server."""
+    """
+    MCP `search_exam_questions` 래퍼.
+
+    Args:
+        search_query: 시맨틱 검색어
+        years: 연도 필터
+        rounds: 회차 필터
+        question_types: 유형 필터
+        year_min: 최소 연도
+        year_max: 최대 연도
+        question_numbers: 문항 번호 필터
+        page_size: 결과 개수 상한
+
+    Returns:
+        MCP 서버와 동일 스키마의 응답 dict
+    """
     return await call_tool(
         "search_exam_questions",
         {

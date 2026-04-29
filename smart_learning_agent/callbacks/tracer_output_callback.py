@@ -39,4 +39,11 @@ def normalize_tracer_callback(callback_context: CallbackContext) -> types.Conten
                 step["code"] = code_lines[line_number - 1].rstrip("\n")
 
     state["tracer_output"] = tracer_output
+
+    # 다음 턴 multi-turn 참조용 persistent summary 저장
+    title = tracer_output.get("title", "")
+    summary = tracer_output.get("summary", "")
+    if title or summary:
+        state["last_tracer_summary"] = f"{title}: {summary}".strip(": ")
+
     return None

@@ -3,9 +3,6 @@ Google ADK 에이전트 실행 및 세션 관리 모듈
 
 FastAPI 엔드포인트 호출을 통한 에이전트 워크플로우 실행 및 원본 결과 이벤트 반환
 
-현재 구현은 Google ADK `App`에 `root_agent`를 등록하고,
-`InMemoryRunner`로 워크플로우를 실행합니다.
-
 `session_service`는 `InMemoryRunner`에 포함된 인메모리 세션 서비스를 사용합니다.
 따라서 세션과 `session.state`는 서버 프로세스 메모리에 저장되며,
 서버 재시작 또는 다중 인스턴스 환경에서는 공유·영속화되지 않습니다.
@@ -32,39 +29,67 @@ log = logging.getLogger(__name__)
 # 허용 가능 이미지 MIME 타입 정의
 _ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 
+_REQUEST_STATE_KEYS = {
+    "current_route",
+    "original_query",
+    "rewritten_query",
+    "intent_output",
+    "solver_query",
+    "solver_output",
+    "vertex_filter_output",
+    "rec_search_results",
+    "rec_query",
+    "rec_subject",
+    "curator_intro",
+    "curator_output",
+    "refine_output",
+    "problem_cards",
+    "tracer_input",
+    "tracer_code",
+    "tracer_code_numbered",
+    "detected_language",
+    "tracer_intro",
+    "tracer_output",
+    "tracer_error",
+    "fallback_output",
+}
+
 # API 사용자 식별용 고정 ID
 USER_ID = "api_user"
 
 # ─── ADK 어플리케이션 구성 ───────────────────────────────────────────────────
-_app = App(
+routing_app = App(
     name=root_agent.name,
     root_agent=root_agent,
 )
 
 # ─── ADK 러너 인스턴스 구성 ───────────────────────────────────────────────────
-workflow_runner = InMemoryRunner(app=_app)
+routing_runner = InMemoryRunner(app=routing_app)
 
 
 # ─── 세션 및 요청 데이터 처리 유틸리티 ──────────────────────────────────────────────
-async def prepare_content(
+async def _prepare_content_for_runner(
+    target_runner: InMemoryRunner,
     query: str,
     image: UploadFile | None,
     session_id: str,
 ) -> types.Content:
     """사용자 요청 데이터 기반 ADK Content 객체 생성 및 세션 초기화"""
-    session = await workflow_runner.session_service.get_session(
-        app_name=workflow_runner.app_name,
+    session = await target_runner.session_service.get_session(
+        app_name=target_runner.app_name,
         user_id=USER_ID,
         session_id=session_id,
     )
     if session is None:
-        await workflow_runner.session_service.create_session(
-            app_name=workflow_runner.app_name,
+        await target_runner.session_service.create_session(
+            app_name=target_runner.app_name,
             user_id=USER_ID,
             session_id=session_id,
             state={"has_image": image is not None},
         )
     else:
+        for key in _REQUEST_STATE_KEYS:
+            session.state.pop(key, None)
         session.state["has_image"] = image is not None
 
     parts: list[types.Part] = []
@@ -82,7 +107,7 @@ async def prepare_content(
             )
 
         image_bytes = await image.read()
-        await save_image_artifact(workflow_runner, USER_ID, session_id, image_bytes, mime_type)
+        await save_image_artifact(target_runner, USER_ID, session_id, image_bytes, mime_type)
         parts.append(
             types.Part(inline_data=types.Blob(data=image_bytes, mime_type=mime_type))
         )
@@ -93,10 +118,19 @@ async def prepare_content(
     return types.Content(role="user", parts=parts)
 
 
-async def get_session_state(session_id: str) -> dict:
-    """특정 세션의 현재 상태 정보 조회"""
-    session = await workflow_runner.session_service.get_session(
-        app_name=workflow_runner.app_name,
+async def prepare_routing_content(
+    query: str,
+    image: UploadFile | None,
+    session_id: str,
+) -> types.Content:
+    """공통 라우팅 workflow용 ADK Content를 생성합니다."""
+    return await _prepare_content_for_runner(routing_runner, query, image, session_id)
+
+
+async def get_routing_state(session_id: str) -> dict:
+    """공통 라우팅 workflow 세션 state를 조회합니다."""
+    session = await routing_runner.session_service.get_session(
+        app_name=routing_runner.app_name,
         user_id=USER_ID,
         session_id=session_id,
     )
@@ -105,44 +139,18 @@ async def get_session_state(session_id: str) -> dict:
     return {}
 
 
-# ─── 에이전트 실행 로직 ───────────────────────────────────────────────────────
-async def execute_agent(session_id: str, content: types.Content):
-    """비스트리밍 모드 기반 ADK 에이전트 실행 및 원본 이벤트 반환"""
-    async for event in workflow_runner.run_async(
-        user_id=USER_ID,
-        session_id=session_id,
-        new_message=content,
-        run_config=RunConfig(max_llm_calls=30),
-    ):
-        yield event
-
-
-async def execute_agent_stream(session_id: str, content: types.Content):
-    """스트리밍 모드 기반 ADK 에이전트 실행 및 원본 이벤트 반환.
-
-    LLM 호출이 60초를 초과하면 TimeoutError가 발생하며,
-    호출부(app.py event_generator)에서 error 이벤트로 변환해 프론트로 전달합니다.
-    """
-    log.info(f"[Workflow] 실행 시작 - Session: {session_id}")
+async def execute_routing_stream(session_id: str, content: types.Content):
+    """공통 라우팅 workflow를 스트리밍 모드로 실행합니다."""
+    log.info(f"[Routing] 실행 시작 - Session: {session_id}")
     try:
-        async for event in workflow_runner.run_async(
+        async for event in routing_runner.run_async(
             user_id=USER_ID,
             session_id=session_id,
             new_message=content,
-            run_config=RunConfig(
-                streaming_mode=StreamingMode.SSE,
-                max_llm_calls=30,
-            ),
+            # 라우팅은 (질문 재작성 + 의도 분류)로 보통 2회 수준이지만,
+            # 네트워크/429 등으로 재시도가 발생하면 호출 수가 늘 수 있어 여유를 둡니다.
+            run_config=RunConfig(streaming_mode=StreamingMode.SSE, max_llm_calls=15),
         ):
-            node_info = getattr(event, "node_info", None)
-            if node_info:
-                log.info(f"[Workflow] Node: {node_info.name} (type: {type(event).__name__})")
             yield event
-    except TimeoutError:
-        log.error(f"[Workflow] 60초 타임아웃 초과 - Session: {session_id}")
-        raise
-    except Exception as e:
-        log.error(f"[Workflow] 실행 중 오류 발생: {str(e)}")
-        raise
     finally:
-        log.info(f"[Workflow] 실행 종료 - Session: {session_id}")
+        log.info(f"[Routing] 실행 종료 - Session: {session_id}")

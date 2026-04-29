@@ -5,7 +5,15 @@
 ## 실행
 
 ```bash
+# stdio(ADK McpToolset·수동 MCP 클라이언트 테스트용 기본값)
 uv run python -m mcp_server.vertexai_search.server
+
+# HTTP(streamable-http) — ADK·client.py 연동 시 필수(127.0.0.1:8200, 메인 API 8000과 구분)
+uv run python -m mcp_server.vertexai_search.server --transport streamable-http --host 127.0.0.1 --port 8200
+
+# HTTP(SSE)로 띄울 때 — 필요 시 사용
+uv run python -m mcp_server.vertexai_search.server --transport sse --host 127.0.0.1
+uv run python -m mcp_server.vertexai_search.server --transport sse -p 9000
 ```
 
 ## Tools

@@ -1,7 +1,7 @@
 """
 코드 추적(tracer) 에이전트를 위한 전처리 노드.
 
-LLM이 추출한 코드/언어 결과를 후속 tracer 에이전트 입력 형태로 정리합니다.
+LLM이 추출한 코드/언어 결과를 후속 tracer 에이전트 입력 형태로 정리
 """
 
 # ─── 모듈 임포트 ───────────────────────────────────────────────────────────
@@ -69,10 +69,20 @@ def prepare_tracer_input_func(
     tracer_code = str(tracer_input.get("tracer_code", "")).strip()
     detected_language = _normalize_language(str(tracer_input.get("detected_language", "")))
 
-    yield Event(
-        state={
-            "tracer_code": tracer_code,
-            "tracer_code_numbered": _build_numbered_code(tracer_code),
-            "detected_language": detected_language,
-        }
-    )
+    state = {
+        "tracer_code": tracer_code,
+        "tracer_code_numbered": _build_numbered_code(tracer_code),
+        "detected_language": detected_language,
+        "tracer_error": "",
+    }
+    if not tracer_code:
+        state["tracer_error"] = (
+            "분석할 코드를 찾지 못했습니다. 코드블록이나 실행 가능한 코드를 함께 보내주세요."
+        )
+    else:
+        # 다음 턴에서 "그 코드 다시 시각화해줘" 같은 참조를 처리하기 위해 persistent state에 저장
+        # (last_tracer_code, last_tracer_language는 _REQUEST_STATE_KEYS에 없어 턴 간 유지됨)
+        state["last_tracer_code"] = tracer_code
+        state["last_tracer_language"] = detected_language
+
+    yield Event(state=state)

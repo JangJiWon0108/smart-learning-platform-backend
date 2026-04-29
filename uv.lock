@@ -7,6 +7,29 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "a2a-sdk"
+version = "0.3.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-api-core" },
+    { name = "httpx" },
+    { name = "httpx-sse" },
+    { name = "protobuf" },
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/cd/ce/f50c904664a0fcafa0909be7a987ef6dcf1d75595532305bcefadb0532af/a2a_sdk-0.3.4.tar.gz", hash = "sha256:79db4c287cab1235a0b0c5af9a3a58eedd8a037b51a87bed2e89f5e5e8977f65", size = 220158, upload-time = "2025-09-02T16:53:48.962Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/44/7a/c7a13e692aba332fb55480c843acb7f3cf43668623f75d127792e8fa9b30/a2a_sdk-0.3.4-py3-none-any.whl", hash = "sha256:423f72334b4a4b34cb4da07d5db3b786975de2fbc527236e3ca713b0d08c27e1", size = 135297, upload-time = "2025-09-02T16:53:46.473Z" },
+]
+
+[package.optional-dependencies]
+http-server = [
+    { name = "fastapi" },
+    { name = "sse-starlette" },
+    { name = "starlette" },
+]
+
+[[package]]
 name = "aiohappyeyeballs"
 version = "2.6.1"
 source = { registry = "https://pypi.org/simple" }
@@ -3718,6 +3741,7 @@ name = "smart-learning-platform"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "a2a-sdk", extra = ["http-server"] },
     { name = "faiss-cpu" },
     { name = "fastapi" },
     { name = "google-adk", extra = ["extensions"] },
@@ -3730,6 +3754,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "a2a-sdk", extras = ["http-server"], specifier = "==0.3.4" },
     { name = "faiss-cpu", specifier = ">=1.13.2" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "google-adk", extras = ["extensions"], specifier = ">=2.0.0a3" },

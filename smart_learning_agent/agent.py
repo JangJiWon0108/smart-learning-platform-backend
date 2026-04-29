@@ -23,54 +23,84 @@ from google.adk import Workflow
 # ─── LLM 에이전트 모듈 임포트 ───────────────────────────────────────────────────
 from .llm_agents.common import intent_classification_agent, query_rewrite_agent
 from .llm_agents.fallback import fallback_agent
-from .llm_agents.recommendation import (
-    curator_intro_agent,
-    filter_agent,
-    question_refine_agent,
-)
+from .llm_agents.recommendation import curator_intro_agent, question_refine_agent
+from .llm_agents.recommendation.filter_agent import filter_agent
+from .llm_agents.recommendation.vertex_search_agent import vertex_search_agent
 from .llm_agents.solver import solver_agent
 from .llm_agents.visualization import tracer_agent, tracer_input_agent, tracer_intro_agent
 
 # ─── 워크플로우 노드 및 전처리 함수 임포트 ─────────────────────────────────────────────
 from smart_learning_agent.nodes.common import intent_router, query_preprocess_func
-from smart_learning_agent.nodes.recommendation import build_curator_output_func, vertex_search_func
+from smart_learning_agent.nodes.recommendation import build_curator_output_func
 from smart_learning_agent.nodes.solver import solver_preprocess_func
 from smart_learning_agent.nodes.visualization import prepare_tracer_input_func
 
-# ─── 메인 워크플로우 그래프 정의 ───────────────────────────────────────────────────
-root_agent = Workflow(
-    name="smart_learning_workflow",
+# ─── 라우팅 및 Route 단위 워크플로우 정의 ─────────────────────────────────────────────
+
+# 공통 전처리 흐름 정의
+routing_agent = Workflow(
+    name="smart_learning_router_workflow",
     edges=[
-        # 공통 전처리 파이프라인 구성 (START → 쿼리 저장 → 이미지 검사 → 쿼리 재구성 → 의도 분석 → 라우팅)
         (
             "START",
-            query_preprocess_func,            # 원본 쿼리 저장
-            query_rewrite_agent,              # 쿼리 rewrite
-            intent_classification_agent,      # 의도 분류
-            intent_router,                    # 라우팅
-        ),
-
-        # 의도 분류 결과 기반 워크플로우 분기 처리
-        (
+            query_preprocess_func,
+            query_rewrite_agent,
+            intent_classification_agent,
             intent_router,
-            {
-                "solver": solver_preprocess_func,           # 문제 풀이
-                "recommendation": filter_agent,             # 문제 추천
-                "visualization": tracer_input_agent,        # 코드 시각화
-                "other": fallback_agent,                    # 지원 불가 안내
-            },
         ),
-
-        # Solver 경로: 이미지 및 텍스트 데이터 전처리 후 문제 풀이 수행
-        (solver_preprocess_func, solver_agent),
-
-        # Recommendation 경로: 검색 필터 생성 및 Vertex AI 검색 엔진 구동
-        (filter_agent, vertex_search_func),
-
-        # Recommendation 경로: 검색 결과 기반 소개 메시지 생성 및 큐레이션 정제 프로세스
-        (vertex_search_func, curator_intro_agent, build_curator_output_func, question_refine_agent),
-
-        # Visualization 경로: 코드 추출 및 코드 추적 시각화 프로세스
-        (tracer_input_agent, prepare_tracer_input_func, tracer_intro_agent, tracer_agent),
     ],
 )
+
+# Solver route workflow (A2A route service)
+solver_route_agent = Workflow(
+    name="solver_route_workflow",
+    edges=[
+        ("START", solver_preprocess_func, solver_agent),
+    ],
+)
+
+# Recommendation route: A2A 서비스 + MCP 검색
+recommendation_route_agent = Workflow(
+    name="recommendation_route_workflow",
+    edges=[
+        (
+            "START",
+            # 1) LLM 메타 필터
+            filter_agent,
+            # 2) MCP search_exam_questions 1회
+            vertex_search_agent,
+            # 3) 소개 → 카드 구성 → 정제
+            curator_intro_agent,
+            build_curator_output_func,
+            question_refine_agent,
+        ),
+    ],
+)
+
+# Visualization route workflow (A2A route service)
+visualization_route_agent = Workflow(
+    name="visualization_route_workflow",
+    edges=[
+        ("START", tracer_input_agent, prepare_tracer_input_func, tracer_intro_agent, tracer_agent),
+    ],
+)
+
+# Fallback route workflow (A2A route service)
+fallback_route_agent = Workflow(
+    name="fallback_route_workflow",
+    edges=[
+        ("START", fallback_agent),
+    ],
+)
+
+# Route workflow (A2A route service가 노출/실행하는 단위)
+route_agents = {
+    "solver": solver_route_agent,
+    "recommendation": recommendation_route_agent,
+    "visualization": visualization_route_agent,
+    "other": fallback_route_agent,
+}
+
+# 표준 엔트리포인트 이름.
+# ADK App에서 사용하는 `root_agent` 파라미터에 주입할 기본 workflow
+root_agent = routing_agent

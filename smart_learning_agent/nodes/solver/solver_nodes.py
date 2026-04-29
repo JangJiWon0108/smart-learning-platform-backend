@@ -46,4 +46,5 @@ def solver_preprocess_func(
         solver_query = rewritten_query
 
     # 2단계: 가공된 쿼리의 세션 상태 저장 및 다음 노드(solver_agent) 전달
-    yield Event(state={"solver_query": solver_query})
+    # last_solver_query는 _REQUEST_STATE_KEYS에 없어 다음 턴에도 유지됨
+    yield Event(state={"solver_query": solver_query, "last_solver_query": solver_query})

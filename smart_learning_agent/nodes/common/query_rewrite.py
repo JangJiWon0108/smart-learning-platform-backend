@@ -26,7 +26,7 @@ def query_preprocess_func(node_input: str) -> Generator[Event, None, None]:
         - original_query: 앞뒤 공백을 제거한 원본 사용자 입력
         - rewritten_query: query_rewrite_agent 실행 전 사용할 원본 기반 기본값
     """
-    # 앞뒤 공백을 제거하고 state에 저장합니다
+    # 앞뒤 공백 제거 후 state 반영
     cleaned_query = node_input.strip()
     yield Event(
         state={

@@ -4,6 +4,7 @@
 추천 에이전트의 입력(검색 필터)과 출력(추천 문제 목록)을 정의합니다.
 """
 
+# ─── 모듈 임포트 ───────────────────────────────────────────────────────────
 from pydantic import BaseModel, Field
 
 
@@ -41,7 +42,6 @@ class VertexFilterOutput(BaseModel):
     실제 검색어는 rewritten_query를 그대로 사용합니다.
     """
 
-    # 메타 필터 조건들 (불필요하면 빈 리스트/null)
     years: list[int] = Field(default_factory=list, description="특정 연도 필터 (예: [2023, 2024])")
     rounds: list[int] = Field(default_factory=list, description="특정 회차 필터 (예: [1, 2])")
     question_types: list[str] = Field(

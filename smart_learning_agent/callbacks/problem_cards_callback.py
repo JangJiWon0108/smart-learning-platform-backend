@@ -14,24 +14,25 @@ from google.adk.agents.callback_context import CallbackContext
 from google.genai import types
 
 # ─── 상수 정의 ─────────────────────────────────────────────────────────────
-# 문제 카드에 적용할 강조 색상 목록
+# 카드 강조 색상 후보
 _CARD_ACCENTS = ["violet", "cyan", "amber", "rose"]
+_MAX_CURATION_CARDS = 3
 
 
 # ─── 헬퍼 함수 ─────────────────────────────────────────────────────────────
 def _accent_for(_problem: dict[str, Any]) -> str:
-    """문제 카드에 무작위 강조 색상을 할당합니다."""
+    """카드별 강조 색상 무작위 선택."""
     return random.choice(_CARD_ACCENTS)
 
 
 def _match_label_for(problem: dict[str, Any]) -> str:
-    """문제 카드의 배지 라벨(과목명 등)을 결정합니다."""
+    """배지 라벨(과목명) 결정."""
     subject = str(problem.get("subject") or "").strip()
     return subject if subject else "추천"
 
 
 def _extract_question_number(problem: dict[str, Any]) -> int | None:
-    """문제 텍스트에서 문제 번호를 추출합니다."""
+    """지문 또는 메타에서 문항 번호 추출."""
     question_number = problem.get("question_number")
     if isinstance(question_number, int):
         return question_number
@@ -46,7 +47,7 @@ def _extract_question_number(problem: dict[str, Any]) -> int | None:
 
 
 def _build_refine_lookup(refine_output: Any) -> dict[str, Any]:
-    """정제된 문제 목록(refine_output)을 ID 기반의 룩업 테이블로 변환합니다."""
+    """refine_output을 문제 id → 정제 dict 룩업으로 변환."""
     if refine_output is None:
         return {}
     if hasattr(refine_output, "model_dump"):
@@ -64,9 +65,9 @@ def _to_problem_cards(
     curator_output: dict[str, Any],
     refine_lookup: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """큐레이션 결과와 정제된 데이터를 결합하여 프론트엔드용 문제 카드 객체 리스트를 만듭니다."""
-    # 1단계: 추천된 문제 중 상위 3개만 추출
-    problems = (curator_output.get("recommended_problems") or [])[:3]
+    """curator_output + refine 룩업 → 프론트 문제 카드 리스트."""
+    # 1단계: 추천 상위 3건
+    problems = (curator_output.get("recommended_problems") or [])[:_MAX_CURATION_CARDS]
     if not isinstance(problems, list):
         return []
 
@@ -78,7 +79,7 @@ def _to_problem_cards(
         problem_id = str(problem.get("id") or "")
         original_question = str(problem.get("question") or "").strip()
 
-        # 2단계: 정제된 데이터(refined)가 있으면 오버라이드
+        # 2단계: refine 있으면 지문·코드 덮어쓰기
         refined = refine_lookup.get(problem_id)
         if refined:
             display_question = refined.get("refined_question") or original_question
@@ -92,7 +93,7 @@ def _to_problem_cards(
         year = int(problem.get("year") or 0)
         round_number = int(problem.get("round") or 0)
 
-        # 3단계: 최종 카드 객체 구성
+        # 3단계: 카드 dict 조립
         cards.append(
             {
                 "problemId": problem_id,
@@ -117,13 +118,49 @@ def _to_problem_cards(
     return cards
 
 
+def _build_problem_cards_summary(cards: list[dict[str, Any]]) -> str:
+    """멀티턴용 문제 카드 텍스트 요약."""
+    if not cards:
+        return ""
+    lines = [f"이전에 추천된 문제 목록 (총 {len(cards)}개):"]
+    for i, card in enumerate(cards, 1):
+        year = card.get("year", "")
+        round_num = card.get("round", "")
+        q_num = card.get("questionNumber", "")
+        code_lang = card.get("codeLanguage") or ""
+        question = str(card.get("question") or "").strip()
+        code = str(card.get("code") or "").strip()
+
+        header = f"[{i}번째] {year}년 {round_num}회 문항 {q_num}"
+        if code_lang:
+            header += f" ({code_lang})"
+        lines.append(header)
+        if question:
+            lines.append(f"지문: {question}")
+        if code:
+            lines.append(f"코드:\n{code}")
+    return "\n".join(lines)
+
+
 # ─── 콜백 함수 ─────────────────────────────────────────────────────────────
 def build_curation_callback(callback_context: CallbackContext) -> types.Content | None:
-    """에이전트 실행 완료 후 최종 UI용 문제 카드를 생성하여 state에 저장합니다."""
+    """
+    question_refine_agent 직후: problem_cards 및 요약 state 반영.
+
+    Args:
+        callback_context: ADK CallbackContext
+
+    Returns:
+        추가 응답 없음. 항상 None.
+
+    state에 저장되는 값:
+        - problem_cards: 프론트 표시용 카드 dict 목록
+        - last_problem_cards_summary: 다음 턴 참조용 요약(세션 정리 키에서 제외되는 경우 유지)
+    """
     state = callback_context.state
     curator_data = state.get("curator_output")
 
-    # 1단계: 큐레이터 데이터 유효성 검사
+    # 1단계: curator_output 유효성
     if curator_data is None:
         return None
 
@@ -133,8 +170,12 @@ def build_curation_callback(callback_context: CallbackContext) -> types.Content 
     if not isinstance(curator_data, dict):
         return None
 
-    # 2단계: 정제 데이터와 결합하여 카드 생성 및 저장
+    # 2단계: refine 결합 후 카드 생성·저장
     refine_lookup = _build_refine_lookup(state.get("refine_output"))
-    state["problem_cards"] = _to_problem_cards(curator_data, refine_lookup)
+    cards = _to_problem_cards(curator_data, refine_lookup)
+    state["problem_cards"] = cards
+
+    # 3단계: 멀티턴용 요약(last_problem_cards_summary는 route state 초기화 대상 아님)
+    state["last_problem_cards_summary"] = _build_problem_cards_summary(cards)
 
     return None

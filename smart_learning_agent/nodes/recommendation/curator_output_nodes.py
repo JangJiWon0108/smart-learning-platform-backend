@@ -14,9 +14,13 @@ from google.adk import Event
 from smart_learning_agent.schemas.curator_output import CuratorOutput, Problem
 
 
+# ─── 상수 정의 ─────────────────────────────────────────────────────────────
+_MAX_RECOMMENDED_PROBLEMS = 3
+
+
 # ─── 헬퍼 함수 ─────────────────────────────────────────────────────────────
 def _problem_id(problem: dict[str, Any], index: int) -> str:
-    """검색 결과의 메타데이터로 안정적인 문제 ID를 생성합니다."""
+    """연도·회차·문항번호 기반 안정 id 문자열 생성."""
     year = problem.get("year") or "unknown"
     round_number = problem.get("round") or "unknown"
     question_number = problem.get("question_number") or index + 1
@@ -24,7 +28,7 @@ def _problem_id(problem: dict[str, Any], index: int) -> str:
 
 
 def _to_problem(problem: dict[str, Any], index: int, rec_subject: str) -> Problem:
-    """Vertex AI Search 결과 1개를 추천 문제 스키마로 변환합니다."""
+    """검색 결과 dict 1건을 Problem 스키마로 매핑."""
     subject = str(problem.get("question_type") or rec_subject or "전체")
 
     return Problem(
@@ -63,7 +67,7 @@ def build_curator_output_func(
     results = rec_search_results or []
     problems = [
         _to_problem(problem, index, rec_subject)
-        for index, problem in enumerate(results[:3])
+        for index, problem in enumerate(results[:_MAX_RECOMMENDED_PROBLEMS])
         if isinstance(problem, dict)
     ]
 

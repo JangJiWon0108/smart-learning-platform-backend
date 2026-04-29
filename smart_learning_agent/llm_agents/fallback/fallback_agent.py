@@ -2,7 +2,7 @@
 서비스 범위 밖의 질문에 친절하게 안내하는 에이전트.
 
 "other" 의도로 분류된 질문에 응답합니다.
-사용자를 서비스의 3가지 핵심 기능으로 자연스럽게 유도합니다.
+사용자를 서비스의 3가지 핵심 기능으로 자연스럽게 유도.
 """
 
 # ─── 모듈 임포트 ───────────────────────────────────────────────────────────
@@ -19,7 +19,7 @@ fallback_agent = Agent(
     name="fallback_agent",
     model=settings.GEMINI_MODEL_TYPE_FALLBACK,
     generate_content_config=GEMINI_GENERATE_CONTENT_RETRY_CONFIG,
-    # 응답을 "fallback_output" 키로 state에 저장합니다
+    # state 키: fallback_output에 응답 저장
     output_key="fallback_output",
     description="지원 범위 외 질문에 대해 친절하게 안내하는 에이전트",
     instruction="""

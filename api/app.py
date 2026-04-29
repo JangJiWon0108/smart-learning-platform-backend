@@ -7,7 +7,6 @@ FastAPI 서버 진입점
   uv run uvicorn api.app:app --reload --app-dir .
 
 엔드포인트 목록
-  POST /chat        - 일반 요청/응답 (전체 결과를 한 번에 반환)
   POST /chat/stream - SSE 스트리밍 (텍스트를 실시간으로 전송)
   GET  /health      - 서버 상태 확인
 """
@@ -19,13 +18,17 @@ import traceback
 import uuid
 from typing import AsyncGenerator
 
+import httpx
+from config.properties import Settings
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from smart_learning_agent import runner
+from smart_learning_agent.streaming import iter_frontend_events
 
 # ─── 환경 설정 및 로거 구성 ───────────────────────────────────────────────────
 log = logging.getLogger("api")
+settings = Settings()
 
 app = FastAPI(title="Smart Learning Platform API")
 
@@ -35,15 +38,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# 실시간 스트리밍 대상 에이전트 목록
-_STREAM_NODES = {
-    "solver_agent",
-    "fallback_agent",
-    "curator_intro_agent",
-    "tracer_intro_agent",
-}
-
 
 # ─── 내부 유틸리티 함수 ───────────────────────────────────────────────────────
 def _classify_error(exc: Exception) -> str:
@@ -64,7 +58,7 @@ def _classify_error(exc: Exception) -> str:
     if isinstance(exc, (ConnectionError, OSError)) or "connection" in cls.lower():
         return "AI 서버에 연결하지 못했습니다. 네트워크 상태를 확인하고 다시 시도해 주세요."
 
-    # ADK가 래핑한 quota 오류는 Google/Vertex 클래스명이 아닐 수 있습니다.
+    # ADK 래핑 quota 오류 시 클래스명이 Google·Vertex 패턴 아님 가능
     if "quota" in msg.lower() or "resource_exhausted" in msg.lower() or "429" in msg:
         return "AI 서비스 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요."
 
@@ -88,66 +82,18 @@ def _classify_error(exc: Exception) -> str:
     return msg if msg else f"오류가 발생했습니다 ({cls})."
 
 
-def _build_curation_payload(state: dict) -> dict | None:
-    """상태 정보 기반 큐레이션 페이로드 생성"""
-    problem_cards = state.get("problem_cards")
-    if problem_cards is None:
-        return None
-
-    return {
-        "type": "curation",
-        "route": state.get("current_route"),
-        "title": "맞춤 추천 문제 카드",
-        "problemCards": problem_cards,
-        "message": None if problem_cards else "지금 조건에 맞는 추천 문제가 없어요.",
+def _route_service_url(route: str) -> str:
+    """라우트명에 맞는 A2A route service stream URL을 반환합니다."""
+    base_urls = {
+        "solver": settings.SOLVER_A2A_URL,
+        "recommendation": settings.RECOMMENDATION_A2A_URL,
+        "visualization": settings.VISUALIZATION_A2A_URL,
+        "other": settings.FALLBACK_A2A_URL,
     }
+    return f"{base_urls[route].rstrip('/')}/stream"
 
 
 # ─── API 엔드포인트 정의 ───────────────────────────────────────────────────────
-@app.post("/chat")
-async def chat(
-    query: str = Form(default=""),
-    image: UploadFile | None = File(default=None),
-    session_id: str = Form(default=""),
-):
-    """일반 채팅 엔드포인트 (비스트리밍 방식)"""
-    if not query.strip() and image is None:
-        raise HTTPException(
-            status_code=400,
-            detail="query 또는 image 중 하나는 필수입니다.",
-        )
-
-    session_id = session_id.strip() or str(uuid.uuid4())
-    content = await runner.prepare_content(query, image, session_id)
-
-    response_text = None
-    async for event in runner.execute_agent(session_id, content):
-        if event.is_final_response() and event.content:
-            for part in event.content.parts:
-                if part.text:
-                    response_text = part.text
-
-    state = await runner.get_session_state(session_id)
-
-    curation = _build_curation_payload(state)
-    if curation:
-        return curation
-
-    tracer_output = state.get("tracer_output")
-    if isinstance(tracer_output, dict) and tracer_output.get("steps"):
-        return {
-            "type": "tracer",
-            "route": state.get("current_route"),
-            "data": tracer_output,
-        }
-
-    return {
-        "type": "text",
-        "route": state.get("current_route"),
-        "response": response_text or "응답을 생성하지 못했습니다.",
-    }
-
-
 @app.post("/chat/stream")
 async def chat_stream(
     query: str = Form(default=""),
@@ -164,104 +110,71 @@ async def chat_stream(
     session_id = session_id.strip() or str(uuid.uuid4())
 
     async def event_generator() -> AsyncGenerator[str, None]:
-        # emitted_nodes: 각 노드의 state 이벤트를 한 번만 보내기 위한 기록
-        # streamed_text_nodes: partial chunk를 이미 보낸 노드의 최종 완성본 중복 전송 방지
-        # streaming_node: 현재 chunk를 전송 중인 노드. stream_end 판단에 사용
-        emitted_nodes: set[str] = set()
-        streamed_text_nodes: set[str] = set()
-        streaming_node: str | None = None
+        route_stream_completed = False
 
         try:
-            # prepare_content도 try 안에서 실행해 모든 초기화 오류를 SSE error로 전달
-            content = await runner.prepare_content(query, image, session_id)
+            content = await runner.prepare_routing_content(query, image, session_id)
+            routing_events = runner.execute_routing_stream(session_id, content)
 
-            prev_node: str | None = None
-            async for event in runner.execute_agent_stream(session_id, content):
-                node_info = getattr(event, "node_info", None)
-                node_name = getattr(node_info, "name", None) if node_info else None
-                is_stream_node = node_name in _STREAM_NODES if node_name else False
+            async def routing_state():
+                return await runner.get_routing_state(session_id)
 
-                # stream_end 조건 1:
-                # chunk를 보내던 스트리밍 노드에서 다른 노드로 넘어간 경우.
-                # 프론트는 이를 보고 현재 답변 말풍선 스트리밍이 끝났다고 처리합니다.
-                if (
-                    prev_node is not None
-                    and streaming_node is not None
-                    and node_name != prev_node
-                    and streaming_node == prev_node
-                ):
-                    yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
-                    streaming_node = None
-                prev_node = node_name
+            async for frontend_event in iter_frontend_events(
+                routing_events,
+                routing_state,
+                emit_final=False,
+            ):
+                yield f"data: {json.dumps(frontend_event, ensure_ascii=False)}\n\n"
 
-                # state 조건:
-                # 새 노드 이름을 처음 만났을 때 모든 노드에 대해 1회 전송합니다.
-                # 프론트는 node 값을 상태 말풍선/로딩 문구로 변환해 보여줍니다.
-                if node_name and node_name not in emitted_nodes:
-                    emitted_nodes.add(node_name)
-                    yield f"data: {json.dumps({'type': 'state', 'node': node_name})}\n\n"
+            state = await runner.get_routing_state(session_id)
+            route = state.get("current_route")
+            if route not in {"solver", "recommendation", "visualization", "other"}:
+                raise ValueError(f"알 수 없는 라우트입니다: {route}")
 
-                # chunk 조건:
-                # 현재 노드가 _STREAM_NODES에 포함되어 있고, ADK 이벤트에 텍스트가 있을 때만 전송합니다.
-                # 프론트는 text 값을 채팅 말풍선에 이어 붙입니다.
-                if is_stream_node and event.content:
-                    for part in event.content.parts:
-                        if part.text and not getattr(part, "function_call", None):
-                            # ADK는 partial 조각 이후 같은 노드의 최종 완성본을 다시 보낼 수 있습니다.
-                            # partial을 이미 보낸 노드라면 최종 완성본은 중복 전송하지 않습니다.
-                            if event.partial:
-                                streaming_node = node_name
-                                streamed_text_nodes.add(node_name)
-                                yield f"data: {json.dumps({'type': 'chunk', 'text': part.text})}\n\n"
-                            elif node_name not in streamed_text_nodes:
-                                streaming_node = node_name
-                                streamed_text_nodes.add(node_name)
-                                yield f"data: {json.dumps({'type': 'chunk', 'text': part.text})}\n\n"
+            data = {
+                "query": state.get("rewritten_query") or query,
+                "session_id": session_id,
+                "state": json.dumps(state, ensure_ascii=False),
+            }
+            files = None
+            if image is not None:
+                await image.seek(0)
+                image_bytes = await image.read()
+                if image_bytes:
+                    files = {
+                        "image": (
+                            image.filename or "upload",
+                            image_bytes,
+                            image.content_type or "application/octet-stream",
+                        )
+                    }
 
-                # stream_end 조건 2:
-                # chunk를 보내던 스트리밍 노드에서 partial=False 종료 이벤트가 들어온 경우.
-                # 다음 노드 이벤트를 기다리지 않게 해서 프론트 대기 말풍선 지연을 줄입니다.
-                if is_stream_node and streaming_node == node_name and not event.partial:
-                    yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
-                    streaming_node = None
-
-            # stream_end 조건 3:
-            # workflow는 끝났지만 stream_end가 누락된 경우 방어적으로 마무리 신호를 보냅니다.
-            if streaming_node is not None:
-                yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
-                streaming_node = None
-
-            # 최종 결과 조건:
-            # workflow가 정상 완료되면 session state에서 구조화 결과를 꺼내 전송합니다.
-            # recommendation은 curation, visualization은 tracer 이벤트로 보냅니다.
-            state = await runner.get_session_state(session_id)
-
-            # curation 조건:
-            # state에 problem_cards가 있으면 추천 문제 카드 최종 결과로 전송합니다.
-            curation = _build_curation_payload(state)
-            if curation:
-                yield f"data: {json.dumps(curation, ensure_ascii=False)}\n\n"
-
-            # tracer 조건:
-            # state에 tracer_output.steps가 있으면 코드 실행 흐름 최종 결과로 전송합니다.
-            tracer_output = state.get("tracer_output")
-            if isinstance(tracer_output, dict) and tracer_output.get("steps"):
-                yield f"data: {json.dumps({'type': 'tracer', 'route': state.get('current_route'), 'data': tracer_output}, ensure_ascii=False)}\n\n"
-            elif state.get("current_route") == "visualization":
-                # visualization route였지만 tracer 결과가 없으면 프론트에 오류 말풍선을 띄웁니다.
-                yield f"data: {json.dumps({'type': 'error', 'message': '코드 실행 흐름 분석에 실패했습니다. 다시 시도해 주세요.'}, ensure_ascii=False)}\n\n"
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream(
+                    "POST",
+                    _route_service_url(route),
+                    data=data,
+                    files=files,
+                ) as response:
+                    response.raise_for_status()
+                    async for chunk in response.aiter_text():
+                        if chunk:
+                            yield chunk
+            route_stream_completed = True
+            return
 
         except Exception as exc:
             log.error("event_generator 예외 [%s]: %s\n%s", type(exc).__name__, exc, traceback.format_exc())
             error_msg = _classify_error(exc)
             # error 조건:
-            # 입력 준비, ADK 실행, 최종 결과 생성 중 예외가 나면 사용자용 오류 메시지를 보냅니다.
+            # 준비·실행·최종 결과 단계 예외 시 사용자용 오류 메시지 SSE
             yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
 
         finally:
             # done 조건:
-            # 성공/실패와 관계없이 전체 /chat/stream 요청이 끝났음을 마지막에 항상 알립니다.
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            # 성공·실패 무관 전체 /chat/stream 요청 종료(done) 신호
+            if not route_stream_completed:
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

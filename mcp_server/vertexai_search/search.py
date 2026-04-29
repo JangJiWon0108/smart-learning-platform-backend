@@ -1,9 +1,13 @@
 """
-정보처리기사 실기 structData 기반 Vertex AI Search 검색 및 메타 필터링 수행.
+정보처리기사 실기 문제 추천용 Vertex AI Search 검색 모듈.
+
+Discovery Engine 검색 요청을 생성하고, 기출 문제 structData 메타데이터 기반 필터를
+적용한 뒤, MCP tool 응답에 맞는 추천 결과 형태로 파싱합니다.
 """
 
 from __future__ import annotations
 
+# ─── 모듈 임포트 ───────────────────────────────────────────────────────────
 from dataclasses import dataclass
 import re
 from typing import Any
@@ -14,9 +18,20 @@ from .discovery_session import vertex_discovery_authorized_session
 from .schemas import SearchExamQuestionsResponse
 
 
+# ─── 검색 메타데이터 모델 ───────────────────────────────────────────────────
 @dataclass(frozen=True)
 class VertexExamSearchMetadata:
-    """vector_store_vertexai.jsonl 내 structData와 대응하는 검색 필터 메타데이터."""
+    """
+    Vertex AI Search structData와 대응하는 검색 필터 메타데이터.
+
+    Attributes:
+        years: 특정 연도 필터
+        rounds: 특정 회차 필터
+        question_types: 문제 유형 필터
+        year_min: 최소 연도 필터
+        year_max: 최대 연도 필터
+        question_numbers: 특정 문항 번호 필터
+    """
 
     years: tuple[int, ...] | None = None
     rounds: tuple[int, ...] | None = None
@@ -26,7 +41,18 @@ class VertexExamSearchMetadata:
     question_numbers: tuple[int, ...] | None = None
 
 
+# ─── 헬퍼 함수 ─────────────────────────────────────────────────────────────
 def _extract_exam_section(content: str, marker: str) -> str:
+    """
+    `[문제]`, `[정답]`, `[해설]` 마커에 해당하는 본문 영역을 추출합니다.
+
+    Args:
+        content: Vertex AI Search chunk content 원문
+        marker: 추출할 섹션 마커 이름
+
+    Returns:
+        마커에 해당하는 섹션 텍스트. 없으면 빈 문자열
+    """
     match = re.search(
         rf"(?:^|\n)\[{re.escape(marker)}\]\s*(.*?)(?=\n\[(?:문제|정답|해설)\]|\Z)",
         content,
@@ -36,6 +62,15 @@ def _extract_exam_section(content: str, marker: str) -> str:
 
 
 def _split_exam_content(content: str) -> tuple[str, str, str]:
+    """
+    검색 chunk content를 문제, 정답, 해설 텍스트로 분리합니다.
+
+    Args:
+        content: Vertex AI Search chunk content 원문
+
+    Returns:
+        `(문제, 정답, 해설)` 튜플
+    """
     question = _extract_exam_section(content, "문제") or content.strip()
     answer = _extract_exam_section(content, "정답")
     explanation = _extract_exam_section(content, "해설")
@@ -43,36 +78,49 @@ def _split_exam_content(content: str) -> tuple[str, str, str]:
 
 
 def _filter_string_literal(value: str) -> str:
+    """Discovery Engine filter 문자열에 사용할 문자열 리터럴을 이스케이프합니다."""
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
 
 
+def _number_equals_filter(field: str, values: tuple[int, ...] | None) -> str | None:
+    """숫자 필드의 단일/복수 equals 조건을 Discovery Engine filter로 변환합니다."""
+    if not values:
+        return None
+    if len(values) == 1:
+        return f"{field} = {int(values[0])}"
+    return "(" + " OR ".join(f"{field} = {int(value)}" for value in values) + ")"
+
+
+# ─── 필터 expression 구성 ───────────────────────────────────────────────────
 def build_vertex_exam_filter_expression(
     meta: VertexExamSearchMetadata | None,
 ) -> str | None:
-    """Build a Discovery Engine filter expression from exam metadata."""
+    """
+    검색 메타데이터를 Discovery Engine filter expression으로 변환합니다.
+
+    Args:
+        meta: 연도, 회차, 문제 유형, 문항 번호 필터 메타데이터
+
+    Returns:
+        Discovery Engine filter expression. 필터가 없으면 None
+    """
     if meta is None:
         return None
     parts: list[str] = []
 
-    if meta.years:
-        if len(meta.years) == 1:
-            parts.append(f"year = {int(meta.years[0])}")
-        else:
-            ors = " OR ".join(f"year = {int(y)}" for y in meta.years)
-            parts.append(f"({ors})")
+    year_filter = _number_equals_filter("year", meta.years)
+    if year_filter:
+        parts.append(year_filter)
 
     if meta.year_min is not None:
         parts.append(f"year >= {int(meta.year_min)}")
     if meta.year_max is not None:
         parts.append(f"year <= {int(meta.year_max)}")
 
-    if meta.rounds:
-        if len(meta.rounds) == 1:
-            parts.append(f"round = {int(meta.rounds[0])}")
-        else:
-            ors = " OR ".join(f"round = {int(r)}" for r in meta.rounds)
-            parts.append(f"({ors})")
+    round_filter = _number_equals_filter("round", meta.rounds)
+    if round_filter:
+        parts.append(round_filter)
 
     if meta.question_types:
         literals = ", ".join(
@@ -80,21 +128,19 @@ def build_vertex_exam_filter_expression(
         )
         parts.append(f"question_type: ANY({literals})")
 
-    if meta.question_numbers:
-        if len(meta.question_numbers) == 1:
-            parts.append(f"question_number = {int(meta.question_numbers[0])}")
-        else:
-            ors = " OR ".join(
-                f"question_number = {int(n)}"
-                for n in meta.question_numbers
-            )
-            parts.append(f"({ors})")
+    question_number_filter = _number_equals_filter(
+        "question_number",
+        meta.question_numbers,
+    )
+    if question_number_filter:
+        parts.append(question_number_filter)
 
     if not parts:
         return None
     return " AND ".join(parts)
 
 
+# ─── Discovery 검색 요청 ────────────────────────────────────────────────────
 def search_vertex_exam(
     search_query: str,
     *,
@@ -108,7 +154,24 @@ def search_vertex_exam(
     semantic_relevance_threshold: float | None = None,
     page_size: int = 10,
 ) -> dict[str, Any]:
-    """Call Vertex AI Search and return the raw Discovery Engine response."""
+    """
+    Vertex AI Search REST API를 호출하고 원본 Discovery Engine 응답을 반환합니다.
+
+    Args:
+        search_query: Vertex AI Search에 전달할 시맨틱 검색어
+        exam_metadata: structData 기반 메타 필터
+        project_id: GCP 프로젝트 ID. 비어 있으면 Settings 사용
+        location: Discovery Engine 리전. 비어 있으면 Settings 사용
+        engine_id: Discovery Engine serving engine ID
+        data_store_id: 검색 대상 data store ID
+        user_pseudo_id: Discovery Engine 개인화/추적용 사용자 식별자
+        relevance_threshold: 키워드 검색 관련도 임계치
+        semantic_relevance_threshold: 시맨틱 검색 관련도 임계치
+        page_size: 검색 결과 개수
+
+    Returns:
+        Discovery Engine search API 원본 JSON 응답
+    """
     cfg = Settings()
     project_id = project_id or cfg.PROJECT_ID
     _cfg_loc = (cfg.VERTEX_AI_SEARCH_LOCATION or "").strip() or cfg.LOCATION
@@ -184,8 +247,25 @@ def retrieve_vertexai_search(
     page_size: int = 10,
 ) -> dict[str, Any]:
     """
-    exam_metadata 기반 메타 필터링 수행.
-    categories는 exam_metadata가 미지정된 경우에만 question_types로 자동 변환 처리.
+    기존 호출부 호환용 Vertex AI Search 검색 래퍼입니다.
+
+    Args:
+        project_id: GCP 프로젝트 ID
+        location: Discovery Engine 리전
+        engine_id: Discovery Engine serving engine ID
+        search_query: Vertex AI Search에 전달할 시맨틱 검색어
+        categories: exam_metadata가 없을 때 question_types로 변환할 카테고리
+        user_pseudo_id: Discovery Engine 개인화/추적용 사용자 식별자
+        num_previous_chunks: 현재 미사용. 기존 인터페이스 호환용
+        num_next_chunks: 현재 미사용. 기존 인터페이스 호환용
+        data_store_id: 검색 대상 data store ID
+        relevance_threshold: 키워드 검색 관련도 임계치
+        semantic_relevance_threshold: 시맨틱 검색 관련도 임계치
+        exam_metadata: structData 기반 메타 필터
+        page_size: 검색 결과 개수
+
+    Returns:
+        Discovery Engine search API 원본 JSON 응답
     """
     _ = (num_previous_chunks, num_next_chunks)
     meta = exam_metadata
@@ -205,9 +285,18 @@ def retrieve_vertexai_search(
     )
 
 
+# ─── 검색 결과 파싱 ────────────────────────────────────────────────────────
 def parse_vertex_results(raw_response: dict[str, Any]) -> list[dict[str, Any]]:
-    """Parse a raw Vertex AI Search response into recommendation-ready records."""
-    parsed_results = []
+    """
+    Vertex AI Search 원본 응답을 추천 카드 생성에 필요한 dict 목록으로 변환합니다.
+
+    Args:
+        raw_response: Discovery Engine search API 원본 JSON 응답
+
+    Returns:
+        문제, 정답, 해설, 연도, 회차, 유형, 문항 번호, 점수를 담은 dict 목록
+    """
+    parsed_results: list[dict[str, Any]] = []
 
     for result in raw_response.get("results", []):
         chunk = result.get("chunk", {})
@@ -222,16 +311,18 @@ def parse_vertex_results(raw_response: dict[str, Any]) -> list[dict[str, Any]]:
         except (TypeError, ValueError):
             relevance_score = 0.0
 
-        parsed_results.append({
-            "question": question_text,
-            "answer": answer_text,
-            "explanation": explanation_text,
-            "year": metadata.get("year"),
-            "round": metadata.get("round"),
-            "question_type": metadata.get("question_type", ""),
-            "question_number": metadata.get("question_number"),
-            "score": round(relevance_score, 4),
-        })
+        parsed_results.append(
+            {
+                "question": question_text,
+                "answer": answer_text,
+                "explanation": explanation_text,
+                "year": metadata.get("year"),
+                "round": metadata.get("round"),
+                "question_type": metadata.get("question_type", ""),
+                "question_number": metadata.get("question_number"),
+                "score": round(relevance_score, 4),
+            }
+        )
 
     return parsed_results
 
@@ -250,7 +341,25 @@ def search_exam_questions(
     relevance_threshold: str | None = None,
     semantic_relevance_threshold: float | None = None,
 ) -> dict[str, Any]:
-    """Search exam questions and return parsed results for the learning agent."""
+    """
+    MCP tool에서 호출하는 기출 문제 검색 함수입니다.
+
+    Args:
+        search_query: Vertex AI Search에 전달할 시맨틱 검색어
+        years: 특정 연도 필터
+        rounds: 특정 회차 필터
+        question_types: 문제 유형 필터
+        year_min: 최소 연도 필터
+        year_max: 최대 연도 필터
+        question_numbers: 특정 문항 번호 필터
+        page_size: 검색 결과 개수
+        user_pseudo_id: Discovery Engine 개인화/추적용 사용자 식별자
+        relevance_threshold: 키워드 검색 관련도 임계치
+        semantic_relevance_threshold: 시맨틱 검색 관련도 임계치
+
+    Returns:
+        MCP tool 응답으로 반환할 파싱된 검색 결과 dict
+    """
     settings = Settings()
     metadata = VertexExamSearchMetadata(
         years=tuple(years or ()) or None,
