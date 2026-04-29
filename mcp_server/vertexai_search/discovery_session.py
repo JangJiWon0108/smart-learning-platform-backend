@@ -1,8 +1,7 @@
 """
-Discovery Engine REST 호출용 인증 세션 생성 모듈.
+Discovery Engine REST 호출용 인증 세션.
 
-프로젝트 공통 GCP 인증 정보를 우선 사용하고, 없으면 Application Default
-Credentials로 Discovery Engine API 호출에 필요한 AuthorizedSession을 만듭니다.
+프로젝트 공통 GCP 자격 증명 우선, 실패 시 Application Default Credentials 폴백.
 """
 
 from __future__ import annotations
@@ -14,13 +13,13 @@ from google.auth.transport.requests import AuthorizedSession
 from credentials.gcp_auth import get_credentials
 
 
-# ─── 헬퍼 함수 ─────────────────────────────────────────────────────────────
+# ─── 연결 설정 ─────────────────────────────────────────────────────────────
 def vertex_discovery_authorized_session() -> AuthorizedSession:
     """
-    Discovery Engine REST API 호출에 사용할 인증 세션을 생성합니다.
+    Discovery Engine API용 AuthorizedSession 반환.
 
     Returns:
-        GCP 인증 정보가 적용된 AuthorizedSession
+        GCP 인증이 적용된 AuthorizedSession
     """
     try:
         return AuthorizedSession(get_credentials())

@@ -1,7 +1,7 @@
 """
-Vertex AI Search MCP 서버 응답 스키마.
+Vertex AI Search MCP 응답용 Pydantic 스키마.
 
-MCP tool이 반환하는 검색 결과와 응답 payload를 Pydantic 모델로 정의합니다.
+MCP tool 구조화 응답과 동일 형태의 모델 정의.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 # ─── 스키마 정의 ───────────────────────────────────────────────────────────
 class ExamSearchResult(BaseModel):
-    """파싱된 기출 문제 검색 결과 1건."""
+    """파싱된 기출 1건."""
 
     question: str = Field(default="", description="문제 지문")
     answer: str = Field(default="", description="정답 텍스트")
@@ -25,7 +25,7 @@ class ExamSearchResult(BaseModel):
 
 
 class SearchExamQuestionsResponse(BaseModel):
-    """`search_exam_questions` MCP tool의 파싱된 응답."""
+    """`search_exam_questions` tool 응답 본문."""
 
     results: list[ExamSearchResult] = Field(default_factory=list, description="검색 결과 목록")
     query: str = Field(default="", description="검색에 사용한 시맨틱 검색어")

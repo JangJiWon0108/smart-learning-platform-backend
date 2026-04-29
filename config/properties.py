@@ -85,8 +85,8 @@ class Settings(BaseSettings):
     FALLBACK_A2A_URL: str = "http://localhost:8104"
 
     # ─── MCP 서버 구성 (streamable-http 전용) ───────────────────────────────
-    # 아래 URL과 맞추려면 MCP를 127.0.0.1:8200 에 띄웁니다.
-    # uv run python -m mcp_server.vertexai_search.server --transport streamable-http --host 127.0.0.1 --port 8200
+    # 추천 에이전트 기동 전 MCP 프로세스 필요. URL의 host·port에 바인드:
+    # uv run python -m mcp_server.vertexai_search.server
     VERTEXAI_SEARCH_MCP_URL: str = "http://127.0.0.1:8200/mcp"
 
     # Pydantic Settings 메타 데이터 정의

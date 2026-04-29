@@ -24,23 +24,19 @@ settings = Settings()
 _SEARCH_TOOL_NAME = "search_exam_questions"
 _MCP_TIMEOUT_SECONDS = 10.0
 
-
-def _vertex_search_toolset() -> McpToolset:
-    """MCP streamable-http 세션 및 search_exam_questions 단일 tool 바인딩."""
-    return McpToolset(
-        connection_params=StreamableHTTPConnectionParams(
-            url=settings.VERTEXAI_SEARCH_MCP_URL,
-            timeout=_MCP_TIMEOUT_SECONDS,
-        ),
-        tool_filter=[_SEARCH_TOOL_NAME],
-    )
-
-
 vertex_search_agent = Agent(
     name="vertex_search_agent",
     model=settings.GEMINI_MODEL_TYPE_FILTER,
     generate_content_config=GEMINI_GENERATE_CONTENT_RETRY_CONFIG,
-    tools=[_vertex_search_toolset()],
+    tools=[
+        McpToolset(
+            connection_params=StreamableHTTPConnectionParams(
+                url=settings.VERTEXAI_SEARCH_MCP_URL,
+                timeout=_MCP_TIMEOUT_SECONDS,
+            ),
+            tool_filter=[_SEARCH_TOOL_NAME],
+        )
+    ],
     after_tool_callback=save_vertex_search_result,
     after_agent_callback=ensure_vertex_search_state,
     description="Vertex AI Search MCP 도구로 추천 후보 문제를 검색하는 에이전트",

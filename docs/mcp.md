@@ -27,7 +27,6 @@ sequenceDiagram
 ```
 
 - ADK 프로세스와 **MCP 프로세스는 별도**입니다. 추천 요청이 올 때 MCP가 안 떠 있으면 연결 실패가 납니다.
-- `extract_vertex_filter` / `build_filter_expression` 등 **다른 MCP tool**은 서버에 붙어 있어도, 이 추천 그래프에서는 `search_exam_questions`만 씁니다.
 
 ---
 
@@ -86,11 +85,7 @@ filter_agent = Agent(
 
 ### MCP 서버 — tool 정의 위치
 
-| tool | 구현·역할 | 추천 그래프 |
-|------|-----------|-------------|
-| `search_exam_questions` | [`server.py`](../mcp_server/vertexai_search/server.py) → [`search.py`](../mcp_server/vertexai_search/search.py) | **사용** |
-| `extract_vertex_filter` | [`server.py`](../mcp_server/vertexai_search/server.py) + [`filter_extraction.py`](../mcp_server/vertexai_search/filter_extraction.py) | 미사용 (CLI·테스트 등) |
-| `build_filter_expression` | [`server.py`](../mcp_server/vertexai_search/server.py) | 보조 |
+`search_exam_questions`는 [`server.py`](../mcp_server/vertexai_search/server.py)에서 등록하며, 구현은 [`search.py`](../mcp_server/vertexai_search/search.py)의 Discovery Engine 호출·파싱 로직을 사용합니다. 추천 그래프에서는 이 tool만 호출합니다.
 
 서버에서 tool 시그니처의 핵심은 아래와 같습니다 (`search_query` + 연·회차·유형 필터 + `page_size`).
 
@@ -111,7 +106,7 @@ def search_exam_questions(
     return search_exam_questions_impl(...)
 ```
 
-기동: **`--transport streamable-http`** 를 써야 ADK `StreamableHTTPConnectionParams`와 짝이 맞습니다. 예시는 [`mcp_server/vertexai_search/README.md`](../mcp_server/vertexai_search/README.md).
+기동: 모듈 직접 실행 시 항상 `streamable-http`이며, 바인드는 `VERTEXAI_SEARCH_MCP_URL`과 동일해야 ADK `StreamableHTTPConnectionParams`와 짝이 맞습니다. 예시는 [`mcp_server/vertexai_search/README.md`](../mcp_server/vertexai_search/README.md).
 
 ---
 
